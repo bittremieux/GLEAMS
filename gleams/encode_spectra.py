@@ -160,11 +160,10 @@ def main():
         for spec in tqdm.tqdm(ms_io.get_spectra(spec_file),
                               desc='Spectra encoded', leave=False,
                               unit='spectra'):
-            if ((metadata_df is None or (spec_file_base, int(spec.identifier))
-                 in metadata_df.index) and
-                    spectrum.is_valid(spectrum.preprocess(
-                        spec, args.fragment_mz_min, args.fragment_mz_max).mz,
-                    config.min_peaks, config.min_mz_range)):
+            if ((metadata_df is None or
+                 (spec_file_base, int(spec.identifier)) in metadata_df.index)
+                    and spectrum.preprocess(spec, args.fragment_mz_min,
+                                            args.fragment_mz_max).is_valid):
                 features.append(enc.encode(spec))
                 spec_i += 1
 

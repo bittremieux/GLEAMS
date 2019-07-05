@@ -209,8 +209,9 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
                          len(ref_spectra), max_num_ref_spectra)
             ref_spectra = random.sample(ref_spectra, max_num_ref_spectra)
         logger.debug('Vectorize the reference spectra')
-        self.ref_vectors = [self.frag_enc.encode(
-            spectrum.preprocess(spec, min_mz, max_mz)) for spec in ref_spectra]
+        self.ref_vectors = [
+            self.frag_enc.encode(spec) for spec in ref_spectra
+            if spectrum.preprocess(spec, min_mz, max_mz).is_valid]
 
         self.feature_names = [f'ref_{i}' for i in range(len(ref_spectra))]
 

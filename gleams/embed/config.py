@@ -5,6 +5,10 @@ from gleams.embed import utils
 # Minimum number of peaks for an MS/MS spectrum to be considered.
 min_peaks = 10
 min_mz_range = 250.
+remove_precursor_tolerance = 0.05
+min_intensity = 0.01
+max_peaks_used = 150
+scaling = 'sqrt'
 
 
 # Encoder settings.
