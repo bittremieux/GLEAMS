@@ -73,9 +73,8 @@ def _parse_spectrum(spectrum_dict: Dict) -> MsmsSpectrum:
     if int(spectrum_dict.get('msLevel', -1)) != 2:
         raise ValueError(f'Unsupported MS level {spectrum_dict["msLevel"]}')
 
-    # FIXME: https://bitbucket.org/levitsky/pyteomics/issues/38/unable-to-modify-mz-intensity-arrays
-    mz_array = spectrum_dict['m/z array'].copy()
-    intensity_array = spectrum_dict['intensity array'].copy()
+    mz_array = spectrum_dict['m/z array']
+    intensity_array = spectrum_dict['intensity array']
     retention_time = spectrum_dict['retentionTime']
 
     precursor_mz = spectrum_dict['precursorMz'][0]['precursorMz']
