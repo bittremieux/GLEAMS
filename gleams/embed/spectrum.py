@@ -99,21 +99,25 @@ def get_num_bins(min_mz: float, max_mz: float, bin_size: float) -> int:
     return math.ceil((max_mz - min_mz) / bin_size)
 
 
-def to_vector(spectrum: MsmsSpectrum, min_mz: float, max_mz: float,
-              bin_size: float, normalize: bool) -> np.ndarray:
+@nb.njit
+def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
+              min_mz: float, bin_size: float, num_bins: int, normalize: bool)\
+        -> np.ndarray:
     """
     Convert the given spectrum to a dense NumPy vector.
 
     Parameters
     ----------
-    spectrum : MsmsSpectrum
-        The spectrum to be converted to a vector.
+    spectrum_mz : np.ndarray
+        The peak m/z values of the spectrum to be converted to a vector.
+    spectrum_intensity : np.ndarray
+        The peak intensities of the spectrum to be converted to a vector.
     min_mz : float
         The minimum m/z to include in the vector.
-    max_mz : float
-        The maximum m/z to include in the vector.
     bin_size : float
         The bin size in m/z used to divide the m/z range.
+    num_bins : int
+        The number of elements of which the vector consists.
     normalize : bool
         Normalize the vector to unit length or not.
 
@@ -122,9 +126,9 @@ def to_vector(spectrum: MsmsSpectrum, min_mz: float, max_mz: float,
     np.ndarray
         The binned spectrum vector.
     """
-    vector = np.zeros((get_num_bins(min_mz, max_mz, bin_size),), np.float32)
+    vector = np.zeros((num_bins,), np.float32)
 
-    for mz, intensity in zip(spectrum.mz, spectrum.intensity):
+    for mz, intensity in zip(spectrum_mz, spectrum_intensity):
         bin_idx = int((mz - min_mz) / bin_size)
         vector[bin_idx] += intensity
 

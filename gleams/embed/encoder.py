@@ -147,9 +147,10 @@ class FragmentEncoder(SpectrumEncoder):
         self.max_mz = max_mz
         self.bin_size = bin_size
         self.normalize = normalize
+        self.num_bins = spectrum.get_num_bins(min_mz, max_mz, bin_size)
 
-        self.feature_names = [f'fragment_bin_{i}' for i in range(
-            spectrum.get_num_bins(min_mz, max_mz, bin_size))]
+        self.feature_names = [f'fragment_bin_{i}'
+                              for i in range(self.num_bins)]
 
     def encode(self, spec: MsmsSpectrum) -> np.ndarray:
         """
@@ -165,8 +166,8 @@ class FragmentEncoder(SpectrumEncoder):
         np.ndarray
             Spectrum fragment features consisting a vector of binned fragments.
         """
-        return spectrum.to_vector(spec, self.min_mz, self.max_mz,
-                                  self.bin_size, self.normalize)
+        return spectrum.to_vector(spec.mz, spec.intensity, self.min_mz,
+                                  self.bin_size, self.num_bins, self.normalize)
 
 
 class ReferenceSpectraEncoder(SpectrumEncoder):
