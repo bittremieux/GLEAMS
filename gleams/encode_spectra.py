@@ -3,6 +3,7 @@ import logging
 import os
 
 import numpy as np
+import pandas as pd
 import tqdm
 
 from gleams.embed import spectrum
@@ -32,8 +33,6 @@ def _declare_args() -> argparse.Namespace:
                         help='output spectrum features file (the .npz '
                              'extension will be appended to the file name if '
                              'it does not already have one)')
-    parser.add_argument('--out_metadata', type=argparse.FileType('w'),
-                        help='output spectrum metadata file')
 
     # Precursor encoding.
     parser.add_argument('--precursor_num_bits_mz',
@@ -108,10 +107,10 @@ def _declare_args() -> argparse.Namespace:
     parser.add_argument('--max_num_spectra', default=None, type=int,
                         help='maximum number of spectra to encode (default: '
                              'all spectra in the specified file(s))')
-    # TODO: PSM metadata is currently ignored.
-    parser.add_argument('--psm_file', type=argparse.FileType('r'),
-                        help='file with search results (for metadata '
-                             'annotation)')
+    parser.add_argument('--metadata',
+                        help='comma-separated metadata file with spectrum '
+                             'identifications (expected columns: filename, '
+                             'scan, sequence, charge)')
 
     parser.add_argument('--debug', action='store_true',
                         help='enable detailed debug logging')
@@ -142,16 +141,29 @@ def main():
             args.bin_size_dot, not args.no_normalize, args.max_num_ref_spectra)
     ])
 
+    if args.metadata is not None:
+        metadata_df = pd.read_csv(args.metadata, index_col=['filename',
+                                                            'scan'])
+    else:
+        metadata_df = None
+
     features = []
     spec_i = 0
     for file_i, spec_file in enumerate(args.spectra_filenames):
-        logger.info('Processing file %s [%d/%d]', os.path.basename(spec_file),
-                    file_i, len(args.spectra_filenames))
+        spec_file_base = os.path.basename(spec_file)
+        logger.info('Processing file %s [%d/%d]', spec_file_base, file_i,
+                    len(args.spectra_filenames))
+        if metadata_df is not None and spec_file_base not in metadata_df.index:
+            logger.warning('File %s not specified in the metadata, '
+                           'skipping...', spec_file_base)
+            continue
         for spec in tqdm.tqdm(ms_io.get_spectra(spec_file),
                               desc='Spectra encoded', leave=False,
                               unit='spectra'):
-            if spectrum.is_valid(spectrum.preprocess(
-                    spec, args.fragment_mz_min, args.fragment_mz_max)):
+            if ((metadata_df is None or (spec_file_base, int(spec.identifier))
+                 in metadata_df.index) and
+                    spectrum.is_valid(spectrum.preprocess(
+                        spec, args.fragment_mz_min, args.fragment_mz_max))):
                 features.append(enc.encode(spec))
                 spec_i += 1
 
