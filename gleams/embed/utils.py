@@ -1,6 +1,7 @@
 import os
 import re
 
+import numba as nb
 import numpy as np
 
 
@@ -11,6 +12,7 @@ averagine_peak_separation_da = 1.0005079
 hydrogen_mass = 1.00794
 
 
+@nb.njit
 def neutral_mass_from_mz_charge(mz: float, charge: int) -> float:
     """
     Calculate the neutral mass of an ion given its m/z and charge.
@@ -52,6 +54,40 @@ def _gray_code(value: int, num_bits: int) -> np.ndarray:
     return np.asarray(list(f'{value ^ (value >> 1):0{num_bits}b}'), np.float32)
 
 
+@nb.njit
+def _get_bin_index(value: float, min_value: float, max_value: float,
+                   num_bits: int) -> int:
+    """
+    Get the index of the given value between a minimum and maximum value given
+    a specified number of bits.
+
+    Parameters
+    ----------
+    value : float
+        The value to be converted to a bin index.
+    min_value : float
+        The minimum possible value.
+    max_value : float
+        The maximum possible value.
+    num_bits : int
+        The number of bits of the encoding.
+
+    Returns
+    -------
+    int
+        The integer bin index of the value between the given minimum and
+        maximum value using the specified number of bits.
+    """
+    # Divide the value range into equal intervals
+    # and find the value's integer index.
+    num_bins = 2 ** num_bits
+    bin_size = (max_value - min_value) / num_bins
+    bin_index = int((value - min_value) / bin_size)
+    # Clip to min/max.
+    bin_index = max(0, min(num_bins - 1, bin_index))
+    return bin_index
+
+
 def binary_encode(value: float, min_value: float, max_value: float,
                   num_bits: int) -> np.ndarray:
     """
@@ -77,13 +113,7 @@ def binary_encode(value: float, min_value: float, max_value: float,
     np.ndarray
         An array of individual bit values as floats.
     """
-    # Divide the value range into equal intervals
-    # and find the value's integer index.
-    num_bins = 2 ** num_bits
-    bin_size = (max_value - min_value) / num_bins
-    bin_index = int((value - min_value) / bin_size)
-    # Clip to min/max.
-    bin_index = max(0, min(num_bins - 1, bin_index))
+    bin_index = _get_bin_index(value, min_value, max_value, num_bits)
     return _gray_code(bin_index, num_bits)
 
 
