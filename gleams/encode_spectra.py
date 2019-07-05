@@ -150,7 +150,6 @@ def main():
         for spec in tqdm.tqdm(ms_io.get_spectra(spec_file),
                               desc='Spectra encoded', leave=False,
                               unit='spectra'):
-            # TODO: Filter on q-value from metadata.
             if spectrum.is_valid(spectrum.preprocess(
                     spec, args.fragment_mz_min, args.fragment_mz_max)):
                 features.append(enc.encode(spec))
