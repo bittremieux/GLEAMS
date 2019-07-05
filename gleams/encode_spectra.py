@@ -29,7 +29,7 @@ def _declare_args() -> argparse.Namespace:
                         help='input spectrum files (in the mzML or mzXML '
                              'format, optionally compressed using gzip or xz)')
     parser.add_argument('--out', required=True,
-                        help='output spectrum features file (the .npy '
+                        help='output spectrum features file (the .npz '
                              'extension will be appended to the file name if '
                              'it does not already have one)')
     parser.add_argument('--out_metadata', type=argparse.FileType('w'),
@@ -161,9 +161,11 @@ def main():
                             args.max_num_spectra)
                 break
 
-    logger.info('Save encoded spectra to %s', os.path.basename(args.out))
-    np.save(args.out, np.vstack(features))
-    # TODO: Collect and store metadata.
+    if len(features) > 0:
+        logger.info('Save encoded spectra to %s', os.path.basename(args.out))
+        np.savez_compressed(args.out, np.vstack(features))
+    else:
+        logger.warning('No spectra selected for encoding')
 
 
 if __name__ == '__main__':
