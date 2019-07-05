@@ -1,27 +1,34 @@
 import functools
 import math
 
+import numba as nb
 import numpy as np
 from spectrum_utils.spectrum import MsmsSpectrum
 
-from gleams.embed import config
 
-
-def is_valid(spectrum: MsmsSpectrum) -> bool:
+@nb.njit
+def is_valid(spectrum_mz: np.ndarray, min_peaks: int, min_mz_range: float)\
+        -> bool:
     """
     Check whether a spectrum is of high enough quality to be used.
 
     Parameters
     ----------
-    spectrum : MsmsSpectrum
-        The sspectrum whose quality is checked.
+    spectrum_mz : np.ndarray
+        M/z peaks of the sspectrum whose quality is checked.
+    min_peaks : int
+        Minimum number of peaks a spectrum has to contain.
+    min_mz_range : float
+        Minimum m/z range the spectrum's peaks need to cover.
 
     Returns
     -------
     bool
-        True if the spectrum has a sufficient number of peaks, False otherwise.
+        True if the spectrum has enough peaks covering a wide enough mass
+        range, False otherwise.
     """
-    return len(spectrum.mz) >= config.min_peaks
+    return (len(spectrum_mz) >= min_peaks and
+            spectrum_mz[-1] - spectrum_mz[0] >= min_mz_range)
 
 
 def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:

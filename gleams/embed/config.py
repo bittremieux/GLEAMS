@@ -3,7 +3,8 @@ from gleams.embed import utils
 # MS/MS spectrum preprocessing settings.
 
 # Minimum number of peaks for an MS/MS spectrum to be considered.
-min_peaks = 20
+min_peaks = 10
+min_mz_range = 250.
 
 
 # Encoder settings.

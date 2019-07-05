@@ -163,7 +163,8 @@ def main():
             if ((metadata_df is None or (spec_file_base, int(spec.identifier))
                  in metadata_df.index) and
                     spectrum.is_valid(spectrum.preprocess(
-                        spec, args.fragment_mz_min, args.fragment_mz_max))):
+                        spec, args.fragment_mz_min, args.fragment_mz_max).mz,
+                    config.min_peaks, config.min_mz_range)):
                 features.append(enc.encode(spec))
                 spec_i += 1
 
