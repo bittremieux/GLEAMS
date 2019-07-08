@@ -149,7 +149,7 @@ def main():
 
     features = []
     spec_i = 0
-    for file_i, spec_file in enumerate(args.spectra_filenames):
+    for file_i, spec_file in enumerate(args.spectra_filenames, 1):
         spec_file_base = os.path.basename(spec_file)
         logger.info('Processing file %s [%d/%d]', spec_file_base, file_i,
                     len(args.spectra_filenames))
