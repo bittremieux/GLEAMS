@@ -6,8 +6,8 @@ from typing import Iterator, Sequence
 
 from spectrum_utils.spectrum import MsmsSpectrum
 
-from gleams.embed import mzml_io
-from gleams.embed import mzxml_io
+from gleams.io import mzml_io
+from gleams.io import mzxml_io
 
 logger = logging.getLogger('gleams')
 

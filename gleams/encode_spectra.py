@@ -8,7 +8,7 @@ import tqdm
 
 from gleams.embed import spectrum
 from gleams.embed import encoder
-from gleams.embed import ms_io
+from gleams.io import ms_io
 from gleams.embed import config
 
 logger = logging.getLogger('gleams')
