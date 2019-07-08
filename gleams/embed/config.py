@@ -29,7 +29,7 @@ bin_size = utils.averagine_peak_separation_da
 bin_size_ref_spec = 0.02
 
 # Reference spectra encoding.
-ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mzML')
+ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mgf')
 max_num_ref_spectra = None
 
 # Default maximum PSM q-value to process a spectrum.

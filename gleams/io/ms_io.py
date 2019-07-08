@@ -6,6 +6,7 @@ from typing import Iterator, Sequence
 
 from spectrum_utils.spectrum import MsmsSpectrum
 
+from gleams.io import mgf_io
 from gleams.io import mzml_io
 from gleams.io import mzxml_io
 
@@ -48,7 +49,9 @@ def get_spectra(filename: str, scan_nrs: Sequence[int] = None)\
     else:
         source = filename
 
-    if ext == '.mzml':
+    if ext == '.mgf':
+        spectrum_io = mgf_io
+    elif ext == '.mzml':
         spectrum_io = mzml_io
     elif ext == '.mzxml':
         spectrum_io = mzxml_io
