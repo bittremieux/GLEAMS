@@ -152,13 +152,39 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
 
 
 @nb.njit
-def dot(mz1: np.ndarray, int1: np.ndarray, mz2: np.ndarray, int2: np.ndarray,
-        fragment_mz_tol: float) -> float:
-    i1, i2, score = 0, 0, 0.
-    for i1 in range(len(mz1)):
-        while mz2[i2] < mz1[i1] - fragment_mz_tol and i2 < len(mz2):
-            i2 += 1
-        if abs(mz1[i1] - mz2[i2]) <= fragment_mz_tol:
-            score += int1[i1] * int2[i2]
-            i2 += 1
+def dot(mz: np.ndarray, intensity: np.ndarray, mz_other: np.ndarray,
+        intensity_other: np.ndarray, fragment_mz_tol: float) -> float:
+    """
+    Compute the dot product between two spectra.
+
+    Note: Spectrum intensities should be normalized prior to computing the dot
+    product.
+
+    Parameters
+    ----------
+    mz : np.ndarray
+        The first spectrum's m/z values.
+    intensity : np.ndarray
+        The first spectrum's intensity values.
+    mz_other : np.ndarray
+        The second spectrum's m/z values.
+    intensity_other : np.ndarray
+        The second spectrum's intensity values.
+    fragment_mz_tol : float
+        The fragment m/z tolerance used to match peaks in both spectra with
+        each other.
+
+    Returns
+    -------
+    float
+        The dot product between both spectra.
+    """
+    fragment_i, fragment_other_i, score = 0, 0, 0.
+    for fragment_i in range(len(mz)):
+        while (mz_other[fragment_other_i] < mz[fragment_i] - fragment_mz_tol
+               and fragment_other_i < len(mz_other)):
+            fragment_other_i += 1
+        if abs(mz[fragment_i] - mz_other[fragment_other_i]) <= fragment_mz_tol:
+            score += intensity[fragment_i] * intensity_other[fragment_other_i]
+            fragment_other_i += 1
     return score
