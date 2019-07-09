@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, IO, Iterator, Sequence, Union
 
+from lxml.etree import LxmlError
 from pyteomics import mzxml
 from spectrum_utils.spectrum import MsmsSpectrum
 
@@ -44,7 +45,7 @@ def get_spectra(source: Union[IO, str], scan_nrs: Sequence[int] = None)\
         for spectrum in spectrum_it():
             try:
                 yield _parse_spectrum(spectrum)
-            except ValueError as e:
+            except (ValueError, LxmlError) as e:
                 logger.warning(f'Failed to read spectrum {spectrum["id"]}: %s',
                                e)
 
