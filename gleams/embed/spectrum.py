@@ -33,6 +33,22 @@ def _check_spectrum_valid(spectrum_mz: np.ndarray, min_peaks: int,
             spectrum_mz[-1] - spectrum_mz[0] >= min_mz_range)
 
 
+@nb.njit
+def _norm_intensity(spectrum_intensity: np.ndarray) -> np.ndarray:
+    """
+    Normalize spectrum peak intensities.
+    Parameters
+    ----------
+    spectrum_intensity : np.ndarray
+        The spectrum peak intensities to be normalized.
+    Returns
+    -------
+    np.ndarray
+        The normalized peak intensities.
+    """
+    return spectrum_intensity / np.linalg.norm(spectrum_intensity)
+
+
 def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:
     if spectrum.is_processed:
         return spectrum
@@ -68,6 +84,8 @@ def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:
         spectrum = spectrum.scale_intensity(scaling,
                                             max_rank=config.max_peaks_used)
 
+    spectrum.intensity = _norm_intensity(spectrum.intensity)
+
     # Set a flag to indicate that the spectrum has been processed to avoid
     # reprocessing.
     spectrum.is_valid = True
@@ -101,7 +119,7 @@ def get_num_bins(min_mz: float, max_mz: float, bin_size: float) -> int:
 
 @nb.njit
 def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
-              min_mz: float, bin_size: float, num_bins: int, normalize: bool)\
+              min_mz: float, bin_size: float, num_bins: int)\
         -> np.ndarray:
     """
     Convert the given spectrum to a dense NumPy vector.
@@ -118,8 +136,6 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
         The bin size in m/z used to divide the m/z range.
     num_bins : int
         The number of elements of which the vector consists.
-    normalize : bool
-        Normalize the vector to unit length or not.
 
     Returns
     -------
@@ -132,4 +148,4 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
         bin_idx = int((mz - min_mz) / bin_size)
         vector[bin_idx] += intensity
 
-    return vector / np.linalg.norm(vector) if normalize else vector
+    return vector / np.linalg.norm(vector)

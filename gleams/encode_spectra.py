@@ -80,10 +80,6 @@ def _declare_args() -> argparse.Namespace:
                         help='bin size used to divide the m/z range for '
                              'spectrum vectorization (default: %(default)s '
                              'm/z)')
-    parser.add_argument('--no_normalize', action='store_false',
-                        help='don\'t normalize the spectrum vectors to unit '
-                             'length (default: spectrum vectors are '
-                             'normalized)')
 
     # Reference spectra encoding.
     parser.add_argument('--ref_spectra', default=config.ref_spectra_filename,
@@ -134,11 +130,10 @@ def main():
             args.precursor_mass_min, args.precursor_mass_max,
             args.precursor_charge_max),
         encoder.FragmentEncoder(
-            args.fragment_mz_min, args.fragment_mz_max, args.bin_size,
-            not args.no_normalize),
+            args.fragment_mz_min, args.fragment_mz_max, args.bin_size),
         encoder.ReferenceSpectraEncoder(
             args.ref_spectra, args.fragment_mz_min, args.fragment_mz_max,
-            args.bin_size_dot, not args.no_normalize, args.max_num_ref_spectra)
+            args.bin_size_dot, args.max_num_ref_spectra)
     ])
 
     if args.metadata is not None:

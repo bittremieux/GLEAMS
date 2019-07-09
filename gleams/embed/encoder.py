@@ -125,8 +125,7 @@ class FragmentEncoder(SpectrumEncoder):
     Represents a spectrum as a vector of fragment ions.
     """
 
-    def __init__(self, min_mz: float, max_mz: float, bin_size: float,
-                 normalize: bool):
+    def __init__(self, min_mz: float, max_mz: float, bin_size: float):
         """
         Instantiate a FragmentEncoder.
 
@@ -138,15 +137,12 @@ class FragmentEncoder(SpectrumEncoder):
             The maximum m/z to use for spectrum vectorization.
         bin_size : float
             The bin size in m/z used to divide the m/z range.
-        normalize : bool
-            Normalize the spectrum vector to unit length or not.
         """
         super().__init__()
 
         self.min_mz = min_mz
         self.max_mz = max_mz
         self.bin_size = bin_size
-        self.normalize = normalize
         self.num_bins = spectrum.get_num_bins(min_mz, max_mz, bin_size)
 
         self.feature_names = [f'fragment_bin_{i}'
@@ -167,7 +163,7 @@ class FragmentEncoder(SpectrumEncoder):
             Spectrum fragment features consisting a vector of binned fragments.
         """
         return spectrum.to_vector(spec.mz, spec.intensity, self.min_mz,
-                                  self.bin_size, self.num_bins, self.normalize)
+                                  self.bin_size, self.num_bins)
 
 
 class ReferenceSpectraEncoder(SpectrumEncoder):
@@ -176,8 +172,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
     """
 
     def __init__(self, filename: str, min_mz: float, max_mz: float,
-                 bin_size: float, normalize: bool,
-                 max_num_ref_spectra: int = None):
+                 bin_size: float, max_num_ref_spectra: int = None):
         """
         Instantiate a ReferenceSpectraEncoder by vectorizing the reference
         spectra in the given file.
@@ -192,15 +187,13 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
             The maximum m/z to include in the vector.
         bin_size : float
             The bin size in m/z used to divide the m/z range.
-        normalize : bool
-            Normalize the vector to unit length or not.
         max_num_ref_spectra : int
             Maximum number of reference spectra to consider. If None, all
             reference spectra are used.
         """
         super().__init__()
 
-        self.frag_enc = FragmentEncoder(min_mz, max_mz, bin_size, normalize)
+        self.frag_enc = FragmentEncoder(min_mz, max_mz, bin_size)
 
         logger.debug('Read the reference spectra')
         ref_spectra = list(ms_io.get_spectra(filename))
