@@ -67,6 +67,7 @@ def _parse_spectrum(spectrum_dict: Dict) -> MsmsSpectrum:
     ------
     ValueError: The spectrum can't be parsed correctly:
         - Not an MS/MS spectrum.
+        - Unknown precursor charge.
     """
     scan_nr = int(spectrum_dict['id'])
 
@@ -78,7 +79,10 @@ def _parse_spectrum(spectrum_dict: Dict) -> MsmsSpectrum:
     retention_time = spectrum_dict['retentionTime']
 
     precursor_mz = spectrum_dict['precursorMz'][0]['precursorMz']
-    precursor_charge = spectrum_dict['precursorMz'][0]['precursorCharge']
+    if 'precursorCharge' in spectrum_dict['precursorMz'][0]:
+        precursor_charge = spectrum_dict['precursorMz'][0]['precursorCharge']
+    else:
+        raise ValueError('Unknown precursor charge')
     activation = spectrum_dict['precursorMz'][0]['activationMethod']
 
     spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
