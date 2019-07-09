@@ -97,9 +97,6 @@ def _declare_args() -> argparse.Namespace:
                              'file)')
 
     # Other arguments.
-    parser.add_argument('--max_q', default=config.max_q, type=float,
-                        help='maximum q-value threshold to consider a '
-                             'spectrum (default: %(default)s)')
     parser.add_argument('--max_num_spectra', default=None, type=int,
                         help='maximum number of spectra to encode (default: '
                              'all spectra in the specified file(s))')
