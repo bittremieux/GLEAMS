@@ -26,11 +26,11 @@ precursor_charge_max = 7
 fragment_mz_min = utils.averagine_peak_separation_da * 50.5
 fragment_mz_max = 2500.
 bin_size = utils.averagine_peak_separation_da
-bin_size_ref_spec = 0.02
 
 # Reference spectra encoding.
 ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mgf')
 max_num_ref_spectra = None
+fragment_mz_tol = 0.05
 
 # Default maximum PSM q-value to process a spectrum.
 # Note: This default value means that no unidentified spectra are processed.

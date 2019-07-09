@@ -149,3 +149,16 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
         vector[bin_idx] += intensity
 
     return vector / np.linalg.norm(vector)
+
+
+@nb.njit
+def dot(mz1: np.ndarray, int1: np.ndarray, mz2: np.ndarray, int2: np.ndarray,
+        fragment_mz_tol: float) -> float:
+    i1, i2, score = 0, 0, 0.
+    for i1 in range(len(mz1)):
+        while mz2[i2] < mz1[i1] - fragment_mz_tol and i2 < len(mz2):
+            i2 += 1
+        if abs(mz1[i1] - mz2[i2]) <= fragment_mz_tol:
+            score += int1[i1] * int2[i2]
+            i2 += 1
+    return score

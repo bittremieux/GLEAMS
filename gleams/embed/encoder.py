@@ -172,7 +172,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
     """
 
     def __init__(self, filename: str, min_mz: float, max_mz: float,
-                 bin_size: float, max_num_ref_spectra: int = None):
+                 fragment_mz_tol: float, max_num_ref_spectra: int = None):
         """
         Instantiate a ReferenceSpectraEncoder by vectorizing the reference
         spectra in the given file.
@@ -185,15 +185,16 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
             The minimum m/z to include in the vector.
         max_mz : float
             The maximum m/z to include in the vector.
-        bin_size : float
-            The bin size in m/z used to divide the m/z range.
+        fragment_mz_tol : float
+            The fragment m/z tolerance used to compute the spectrum dot
+            product to the reference spectra.
         max_num_ref_spectra : int
             Maximum number of reference spectra to consider. If None, all
             reference spectra are used.
         """
         super().__init__()
 
-        self.frag_enc = FragmentEncoder(min_mz, max_mz, bin_size)
+        self.fragment_mz_tol = fragment_mz_tol
 
         logger.debug('Read the reference spectra')
         ref_spectra = list(ms_io.get_spectra(filename))
@@ -203,9 +204,9 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
                          len(ref_spectra), max_num_ref_spectra)
             ref_spectra = random.sample(ref_spectra, max_num_ref_spectra)
         logger.debug('Vectorize the reference spectra')
-        self.ref_vectors = [
-            self.frag_enc.encode(spec) for spec in ref_spectra
-            if spectrum.preprocess(spec, min_mz, max_mz).is_valid]
+        self.ref_spectra = [spec for spec in ref_spectra
+                            if (spectrum.preprocess(spec, min_mz, max_mz)
+                                .is_valid)]
 
         self.feature_names = [f'ref_{i}' for i in range(len(ref_spectra))]
 
@@ -225,7 +226,9 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
             Reference spectrum features consisting of the spectrum's dot
             product similarity to a set of reference spectra.
         """
-        return np.dot(self.ref_vectors, self.frag_enc.encode(spec))
+        return np.asarray([spectrum.dot(ref.mz, ref.intensity, spec.mz,
+                                        spec.intensity, self.fragment_mz_tol)
+                           for ref in self.ref_spectra])
 
 
 class MultipleEncoder(SpectrumEncoder):

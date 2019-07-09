@@ -85,11 +85,11 @@ def _declare_args() -> argparse.Namespace:
     parser.add_argument('--ref_spectra', default=config.ref_spectra_filename,
                         help='reference spectra file name (default: '
                              '%(default)s)')
-    parser.add_argument('--bin_size_dot',
-                        default=config.bin_size_ref_spec, type=float,
-                        help='bin size used to divide the m/z range for '
-                             'spectrum dot product (default: %(default)s '
-                             'm/z)')
+    parser.add_argument('--fragment_mz_tol',
+                        default=config.fragment_mz_tol, type=float,
+                        help='fragment m/z tolerance used to compute the '
+                             'spectrum dot product against reference spectra '
+                             '(default: %(default)s m/z)')
     parser.add_argument('--max_num_ref_spectra',
                         default=config.max_num_ref_spectra, type=int,
                         help='maximum number of reference spectra used '
@@ -133,7 +133,7 @@ def main():
             args.fragment_mz_min, args.fragment_mz_max, args.bin_size),
         encoder.ReferenceSpectraEncoder(
             args.ref_spectra, args.fragment_mz_min, args.fragment_mz_max,
-            args.bin_size_dot, args.max_num_ref_spectra)
+            args.fragment_mz_tol, args.max_num_ref_spectra)
     ])
 
     if args.metadata is not None:
