@@ -43,12 +43,15 @@ def get_spectra(source: Union[IO, str], scan_nrs: Sequence[int] = None)\
                     if int(spectrum_dict.get('ms level', -1)) == 2:
                         yield spectrum_dict
 
-        for spectrum in spectrum_it():
-            try:
-                yield _parse_spectrum(spectrum)
-            except (ValueError, LxmlError) as e:
-                logger.warning(f'Failed to read spectrum {spectrum["id"]}: %s',
-                               e)
+        try:
+            for spectrum in spectrum_it():
+                try:
+                    yield _parse_spectrum(spectrum)
+                except ValueError as e:
+                    logger.warning(f'Failed to read spectrum %s: %s',
+                                   spectrum['id'], e)
+        except LxmlError as e:
+            logger.warning('Failed to read file %s: %s', source, e)
 
 
 def _parse_spectrum(spectrum_dict: Dict) -> MsmsSpectrum:
