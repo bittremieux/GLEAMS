@@ -9,7 +9,7 @@ import pandas as pd
 from pyteomics.mass import fast_mass
 from spectrum_utils.spectrum import MsmsSpectrum
 
-from gleams.embed import config
+from gleams import config
 from gleams.embed import utils
 
 # We need to explicitly add the MS2Pip directory to the path because we're not

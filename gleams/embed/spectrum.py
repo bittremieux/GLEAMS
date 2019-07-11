@@ -5,7 +5,7 @@ import numba as nb
 import numpy as np
 from spectrum_utils.spectrum import MsmsSpectrum
 
-from gleams.embed import config
+from gleams import config
 
 
 @nb.njit

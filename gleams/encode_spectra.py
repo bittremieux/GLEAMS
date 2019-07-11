@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 import tqdm
 
+from gleams import config
 from gleams.embed import spectrum
 from gleams.embed import encoder
+from gleams.embed import theoretical
 from gleams.io import ms_io
-from gleams.embed import config
 
 logger = logging.getLogger('gleams')
 
@@ -139,7 +140,8 @@ def main():
     else:
         metadata_df = None
 
-    features = []
+    # Encode experimental spectra.
+    features, peptides, charges = [], [], []
     spec_i = 0
     for file_i, spec_file in enumerate(args.spectra_filenames, 1):
         spec_file_base = os.path.basename(spec_file)
@@ -157,6 +159,11 @@ def main():
                     and spectrum.preprocess(spec, args.fragment_mz_min,
                                             args.fragment_mz_max).is_valid):
                 features.append(enc.encode(spec))
+                if metadata_df is not None:
+                    peptides.append(
+                        metadata_df.loc[(spec_file_base, int(spec.identifier)),
+                                        'sequence'])
+                    charges.append(spec.precursor_mz)
                 spec_i += 1
 
             if (args.max_num_spectra is not None and
@@ -170,6 +177,18 @@ def main():
         np.savez_compressed(args.out, np.vstack(features))
     else:
         logger.warning('No spectra selected for encoding')
+
+    # Encode corresponding theoretical spectra.
+    # TODO: Flag whether we need to simulate spectra or not.
+    features = []
+    if len(peptides) > 0:
+        spectrum_simulator = theoretical.SpectrumSimulator()
+        for spec in spectrum_simulator.simulate(peptides, charges):
+            features.append(enc.encode(spec))
+        filename = f'{os.path.splitext(args.out)[0]}_simulated.npz'
+        logger.info('Save simulated encoded spectra to %s',
+                    os.path.basename(filename))
+        np.savez_compressed(filename, np.vstack(features))
 
 
 if __name__ == '__main__':
