@@ -12,8 +12,8 @@ from spectrum_utils.spectrum import MsmsSpectrum
 from gleams import config
 from gleams.embed import utils
 
-# We need to explicitly add the MS2Pip directory to the path because we're not
-# using MS2Pip as a stand-alone script.
+# We need to explicitly add the MS2PIP directory to the path because we're not
+# using MS2PIP as a stand-alone script.
 ms2pip_dir = os.path.realpath(os.path.join(__file__, '../../../ms2pip_c'))
 if ms2pip_dir not in sys.path:
     sys.path.append(ms2pip_dir)
@@ -39,14 +39,33 @@ class PrintSuppressor:
 
 class SpectrumSimulator:
     """
-    Simulate theoretical spectra using MS2Pip.
+    Simulate theoretical spectra using MS2PIP.
+
+    Current MS2PIP release: v20190624.
     """
 
-    def __init__(self):
+    def __init__(self, model: str = 'HCDch2'):
         """
         Instantiate a SpectrumSimulator.
+
+        Parameters
+        ----------
+        model : str (default: 'HCDch2')
+            The MS2PIP model used to predict theoretical spectra. Allowed
+            values are 'HCD', 'CID', 'TTOF5600', 'TMT', 'iTRAQ',
+            'iTRAQphospho', 'HCDch2'.
         """
-        pass
+        models = ('HCD', 'CID', 'TTOF5600', 'TMT', 'iTRAQ', 'iTRAQphospho',
+                  'HCDch2')
+        if model not in models:
+            logger.error('Incorrect MS2PIP model, should be one of: %s '
+                         '(default: %s)', ', '.join(models),
+                         config.ms2pip_model)
+            raise ValueError(f'Incorrect MS2PIP model, should be one of: '
+                             f'{", ".join(models)} (default: '
+                             f'{config.ms2pip_model})')
+        else:
+            self.model = model
 
     def simulate(self, peptides: List[str], charges: List[int])\
             -> Iterator[MsmsSpectrum]:
@@ -67,16 +86,16 @@ class SpectrumSimulator:
 
         """
         # TODO: Batch the spectrum predictions.
-        logger.info('Predict spectra for %d peptides using MS2Pip',
+        logger.info('Predict spectra for %d peptides using MS2PIP',
                     len(peptides))
         peptides_no_mod, peptides_mods_md = [], []
         with tempfile.NamedTemporaryFile('w+', delete=False) as f_config,\
                 tempfile.NamedTemporaryFile('w+', delete=False) as f_pep,\
                 tempfile.NamedTemporaryFile('w+', delete=False) as f_out:
             # Create suitable config and PEPREC files.
-            f_config.write('model=HCDch2\n')
+            f_config.write(f'model={self.model}\n')
             f_config.write(f'frag_error={config.fragment_mz_tol}\n')
-            logger.debug('MS2Pip configuration file written to %s',
+            logger.debug('MS2PIP configuration file written to %s',
                          f_config.name)
 
             peprec = [['spec_id', 'peptide', 'modifications', 'charge']]
@@ -106,18 +125,18 @@ class SpectrumSimulator:
                 f_config.write(f'ptm={name},{md},opt,{aa}\n')
 
             f_pep.write('\n'.join([' '.join(row) for row in peprec]))
-            logger.debug('MS2Pip PEPREC file written to %s', f_pep.name)
+            logger.debug('MS2PIP PEPREC file written to %s', f_pep.name)
 
-            # Run MS2Pip
+            # Run MS2PIP.
             f_pep.seek(0)
             f_config.seek(0)
-            logger.debug('Write MS2Pip spectrum predictions to '
+            logger.debug('Write MS2PIP spectrum predictions to '
                          '%s_predictions.csv', f_out.name)
             with PrintSuppressor():
                 ms2pipC.run(f_pep.name, config_file=f_config.name,
                             num_cpu=os.cpu_count(), output_filename=f_out.name)
 
-            # Collect the MS2Pip predictions.
+            # Collect the MS2PIP predictions.
             predictions = pd.read_csv(f'{f_out.name}_predictions.csv',
                                       index_col='spec_id')
             for spec_id, peptide, charge, md in zip(

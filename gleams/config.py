@@ -31,3 +31,6 @@ bin_size = utils.averagine_peak_separation_da
 ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mgf')
 max_num_ref_spectra = None
 fragment_mz_tol = 0.05
+
+# Theoretical spectrum simulation.
+ms2pip_model = 'HCDch2'

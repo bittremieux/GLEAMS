@@ -106,6 +106,13 @@ def _declare_args() -> argparse.Namespace:
                              'identifications (expected columns: filename, '
                              'scan, sequence, charge)')
 
+    parser.add_argument('--simulate_training_spectra', action='store_true',
+                        help='simulate theoretical spectra to be used as '
+                             'training data for the GLEAMS neural network')
+    parser.add_argument('--ms2pip_model', default=config.ms2pip_model,
+                        help='MS2PIP model used to predict theoretical spectra'
+                             ' (default: %(default)s)')
+
     parser.add_argument('--debug', action='store_true',
                         help='enable detailed debug logging')
 
@@ -146,7 +153,7 @@ def main():
     spec_i = 0
     for file_i, spec_file in enumerate(args.spectra_filenames, 1):
         spec_file_base = os.path.basename(spec_file)
-        logger.info('Processing file %s [%d/%d]', spec_file_base, file_i,
+        logger.info('Process file %s [%d/%d]', spec_file_base, file_i,
                     len(args.spectra_filenames))
         if metadata_df is not None and spec_file_base not in metadata_df.index:
             logger.warning('File %s not specified in the metadata, '
@@ -179,17 +186,39 @@ def main():
     else:
         logger.warning('No spectra selected for encoding')
 
-    # Encode corresponding theoretical spectra.
-    # TODO: Flag whether we need to simulate spectra or not.
-    features = []
-    if len(peptides) > 0:
-        spectrum_simulator = theoretical.SpectrumSimulator()
-        for spec in spectrum_simulator.simulate(peptides, charges):
-            features.append(enc.encode(spec))
-        filename = f'{os.path.splitext(args.out)[0]}_simulated.npz'
-        logger.info('Save simulated encoded spectra to %s',
-                    os.path.basename(filename))
-        np.savez_compressed(filename, np.vstack(features))
+    # Encode corresponding positive and negative training theoretical spectra.
+    if args.simulate_training_spectra:
+        if metadata_df is None:
+            logger.warning('Unable to simulate theoretical spectra because no '
+                           'metadata including spectrum identifications has '
+                           'been provided')
+        elif len(peptides) == 0:
+            logger.warning('Unable to simulate theoretical spectra because no '
+                           'spectra were selected for encoding')
+        else:
+            spectrum_simulator = theoretical.SpectrumSimulator(
+                args.ms2pip_model)
+            logger.info('Simulate positive training examples for the '
+                        'experimental spectra')
+            features = [enc.encode(spec) for spec in tqdm.tqdm(
+                spectrum_simulator.simulate(peptides, charges),
+                desc='Spectra encoded', leave=False, unit='spectra')]
+            filename = f'{os.path.splitext(args.out)[0]}_sim_pos.npz'
+            logger.info('Save simulated positive training spectra to %s',
+                        os.path.basename(filename))
+            np.savez_compressed(filename, np.vstack(features))
+            logger.info('Simulate negative training examples for the '
+                        'experimental spectra')
+            # TODO: Properly get negative training peptides: Shuffle peptides?
+            features = [enc.encode(spec) for spec in tqdm.tqdm(
+                spectrum_simulator.simulate(peptides, charges),
+                desc='Spectra encoded', leave=False, unit='spectra')]
+            filename = f'{os.path.splitext(args.out)[0]}_sim_neg.npz'
+            logger.info('Save simulated negative training spectra to %s',
+                        os.path.basename(filename))
+            np.savez_compressed(filename, np.vstack(features))
+
+    logger.info('Encoding completed')
 
 
 if __name__ == '__main__':
