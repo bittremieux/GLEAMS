@@ -1,11 +1,18 @@
 import os
+import random
 import re
+import string
+from typing import Iterator, Tuple
 
 import numba as nb
 import numpy as np
 
 
+random.seed(42)
+
+
 regex_non_alpha = re.compile('[^A-Za-z]+')
+regex_modifications = re.compile('[A-Z]?[-+]?\d*\.\d+|\d+')
 
 averagine_peak_separation_da = 1.0005079
 
@@ -134,6 +141,55 @@ def normalize_peptide(peptide: str) -> str:
     """
     return (regex_non_alpha.sub('', peptide).upper().replace('I', 'L')
             if peptide is not None else None)
+
+
+def get_peptide_modifications(peptide: str)\
+        -> Iterator[Tuple[float, str, int]]:
+    """
+    Extract modifications from a peptide sequence.
+
+    Parameters
+    ----------
+    peptide : str
+        The peptide sequence from which modifications are extracted.
+
+    Returns
+    -------
+    Tuple[float, str, int]
+        An iterator over tuples for each modification that is present in the
+        peptide sequence consisting of the modification's mass difference,
+        the amino acid on which the modification is active (or 'N-term' for
+        N-terminal modifications), and the amino acid position of the
+        modification (1-based, 0 for N-terminal modifications).
+    """
+    match = re.search(regex_modifications, peptide)
+    while match is not None:
+        if match[0][0].isalpha():
+            # Internal modification.
+            pos = match.start() + 1
+            peptide = peptide[:pos] + peptide[match.end():]
+            yield float(match[0][1:]), match[0][0], pos
+        else:
+            # N-terminal modification.
+            peptide = peptide[match.end():]
+            yield float(match[0]), 'N-term', 0
+        match = re.search(regex_modifications, peptide)
+
+
+def generate_random_string(length: int) -> str:
+    """
+    Generate a random alphabetic string.
+
+    Parameters
+    ----------
+    length : int
+        The length of the string.
+
+    Returns
+    -------
+    A random string consisting of alphabetic characters.
+    """
+    return ''.join(random.choices(string.ascii_lowercase, k=length))
 
 
 def get_data_path(filename: str) -> str:
