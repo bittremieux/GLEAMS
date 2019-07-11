@@ -135,8 +135,9 @@ def main():
     ])
 
     if args.metadata is not None:
-        metadata_df = pd.read_csv(args.metadata, index_col=['filename',
-                                                            'scan'])
+        logging.info('Read metadata file %s', os.path.basename(args.metadata))
+        metadata_df = pd.read_csv(args.metadata)
+        metadata_df.set_index(['filename', 'scan'], inplace=True)
     else:
         metadata_df = None
 
