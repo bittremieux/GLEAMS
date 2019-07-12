@@ -181,8 +181,8 @@ def dot(mz: np.ndarray, intensity: np.ndarray, mz_other: np.ndarray,
     """
     fragment_i, fragment_other_i, score = 0, 0, 0.
     for fragment_i in range(len(mz)):
-        while (mz_other[fragment_other_i] < mz[fragment_i] - fragment_mz_tol
-               and fragment_other_i < len(mz_other)):
+        while (fragment_other_i < len(mz_other) - 1 and
+               mz_other[fragment_other_i] < mz[fragment_i] - fragment_mz_tol):
             fragment_other_i += 1
         if abs(mz[fragment_i] - mz_other[fragment_other_i]) <= fragment_mz_tol:
             score += intensity[fragment_i] * intensity_other[fragment_other_i]
