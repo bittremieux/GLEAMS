@@ -5,7 +5,7 @@ rndm.set_seeds()
 from keras import backend as K
 from keras import Input
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
-    MaxPooling1D
+    MaxPooling1D, Reshape
 from keras.models import Model
 from keras.optimizers import Adam
 
@@ -128,9 +128,11 @@ class Embedder:
         """
         # Precursor features are processed through two dense layers.
         precursor_input = Input((self.num_precursor_features,))
-        precursor_dense32 = (Dense(32, 'selu', kernel_initializer='he_uniform')
+        precursor_dense32 = (Dense(32, activation='selu',
+                                   kernel_initializer='he_uniform')
                              (precursor_input))
-        precursor_dense5 = (Dense(5, 'selu', kernel_initializer='he_uniform')
+        precursor_dense5 = (Dense(5, activation='selu',
+                                  kernel_initializer='he_uniform')
                             (precursor_dense32))
 
         filters = 30
@@ -141,22 +143,27 @@ class Embedder:
         # Fragment features are processed through a single convolutional and
         # max pooling layer.
         fragment_input = Input((self.num_fragment_features,))
-        fragment_conv = Conv1D(filters, kernel_size, strides,
-                               activation='selu')(fragment_input)
+        fragment_input_reshape =\
+            Reshape((self.num_fragment_features, 1))(fragment_input)
+        fragment_conv = Conv1D(filters, kernel_size, strides=strides,
+                               activation='selu')(fragment_input_reshape)
         fragment_maxpool = MaxPooling1D(pool_size, pool_strides)(fragment_conv)
         fragment_output = Flatten()(fragment_maxpool)
 
         # Reference spectra features are processed through a single
         # convolutional and max pooling layer.
         ref_spectra_input = Input((self.num_ref_spectra_features,))
-        ref_spectra_conv = Conv1D(filters, kernel_size, strides,
-                                  activation='selu')(ref_spectra_input)
+        ref_spectra_input_reshape =\
+            Reshape((self.num_ref_spectra_features, 1))(ref_spectra_input)
+        ref_spectra_conv = Conv1D(filters, kernel_size, strides=strides,
+                                  activation='selu')(ref_spectra_input_reshape)
         ref_spectra_maxpool = (MaxPooling1D(pool_size, pool_strides)
                                (ref_spectra_conv))
         ref_spectra_output = Flatten()(ref_spectra_maxpool)
 
         # Combine all outputs and add a final dense layer.
-        output_layer = (Dense(32, 'selu', kernel_initializer='he_uniform')
+        output_layer = (Dense(32, activation='selu',
+                              kernel_initializer='he_uniform')
                         (concatenate([precursor_dense5, fragment_output,
                                       ref_spectra_output])))
 
@@ -175,12 +182,12 @@ class Embedder:
         # Both arms of the Siamese network use the same model, i.e. the weights
         # are tied.
         base_model = self._build_base_model()
-        input_left = Input((self.num_precursor_features +
-                            self.num_fragment_features +
-                            self.num_ref_spectra_features,))
-        input_right = Input((self.num_precursor_features +
-                             self.num_fragment_features +
-                             self.num_ref_spectra_features,))
+        input_left = [Input((self.num_precursor_features,)),
+                      Input((self.num_fragment_features,)),
+                      Input((self.num_ref_spectra_features,))]
+        input_right = [Input((self.num_precursor_features,)),
+                       Input((self.num_fragment_features,)),
+                       Input((self.num_ref_spectra_features,))]
         output_left = base_model(input_left)
         output_right = base_model(input_right)
 
@@ -189,5 +196,6 @@ class Embedder:
                     ([output_left, output_right]))
 
         # Train using Adam to optimize the contrastive loss.
-        self.model = Model(inputs=[input_left, input_right], outputs=distance)
+        self.model = Model(inputs=[*input_left, *input_right],
+                           outputs=distance)
         self.model.compile(Adam(self.lr), contrastive_loss)
