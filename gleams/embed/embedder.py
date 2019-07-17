@@ -2,6 +2,7 @@
 from gleams.embed import rndm
 rndm.set_seeds()
 
+import keras
 from keras import backend as K
 from keras import Input
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
@@ -103,6 +104,32 @@ class Embedder:
         self.lr = lr
 
         self.model = None
+
+    def save(self, filename: str):
+        """
+        Save a model and its training status.
+
+        Parameters
+        ----------
+        filename : str
+            The file name to save the model.
+        """
+        if self.model is None:
+            raise ValueError('The model hasn\'t been constructed yet')
+        else:
+            self.model.save(filename)
+
+    def load(self, filename: str):
+        """
+        Load a saved model and its training status from the given file.
+
+        Parameters
+        ----------
+        filename : str
+            The file name of the saved model to be loaded.
+        """
+        self.model = keras.models.load_model(
+            filename, custom_objects={'contrastive_loss': contrastive_loss})
 
     def _build_base_model(self) -> Model:
         """
