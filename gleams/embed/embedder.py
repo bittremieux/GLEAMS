@@ -1,3 +1,7 @@
+# Set all random seeds for Keras.
+from gleams.embed import rndm
+rndm.set_seeds()
+
 from keras import backend as K
 from keras import Input
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
