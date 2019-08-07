@@ -1,4 +1,5 @@
 import logging
+import operator
 import os
 import sys
 import tempfile
@@ -67,8 +68,8 @@ class SpectrumSimulator:
         else:
             self.model = model
 
-    def simulate(self, peptides: List[str], charges: List[int])\
-            -> Iterator[MsmsSpectrum]:
+    def simulate(self, peptides: List[str], charges: List[int],
+                 decoy: bool = False) -> Iterator[MsmsSpectrum]:
         """
         Generate simulated spectra for the given peptides with the given
         charge,
@@ -80,10 +81,14 @@ class SpectrumSimulator:
             sequences can have modifications specified as mass differences.
         charges : List[int]
             The precursor charge to simulate the spectra.
+        decoy : bool, optional
+            Convert the peptides to decoy peptides by shuffling them before
+            simulating their spectra.
 
         Returns
         -------
-
+        Iterator[MsmsSpectrum]
+            An iterator over the simulated spectra.
         """
         # TODO: Batch the spectrum predictions.
         logger.info('Predict spectra for %d peptides using MS2PIP',
@@ -103,6 +108,15 @@ class SpectrumSimulator:
             # modifications.
             mods, mod_keys = {}, set()
             for i, (peptide, charge) in enumerate(zip(peptides, charges)):
+                peptide_no_mod = utils.normalize_peptide(peptide)
+                # Shuffle the peptide to generate a decoy if necessary.
+                aa_order = np.arange(len(peptide_no_mod))
+                if decoy:
+                    # Keep the N-terminal and C-terminal amino acids in place.
+                    np.random.shuffle(aa_order[1:-1])
+                    peptide_no_mod = ''.join(np.asarray(list(peptide_no_mod))
+                                             [aa_order])
+                # Specify the positions of the modifications.
                 pep_mods, peptide_mods_md = [], 0.
                 for md, aa, pos in utils.get_peptide_modifications(peptide):
                     if (md, aa) not in mods:
@@ -111,9 +125,13 @@ class SpectrumSimulator:
                             name = utils.generate_random_string(3)
                         mods[(md, aa)] = name
                         mod_keys.add(name)
-                    pep_mods.append(f'{pos}|{mods[(md, aa)]}')
+                    pep_mods.append((aa_order[pos],
+                                     f'{aa_order[pos]}|{mods[(md, aa)]}'))
                     peptide_mods_md += md
-                peptide_no_mod = utils.normalize_peptide(peptide)
+                if decoy:
+                    pep_mods = sorted(pep_mods, key=operator.itemgetter(0))
+                pep_mods = [pm[1] for pm in pep_mods]
+                # Store the peptide in the PEPREC format.
                 peprec.append([str(i), peptide_no_mod,
                                ('|'.join(pep_mods)
                                 if len(pep_mods) > 0 else '-'),

@@ -224,9 +224,9 @@ def main():
             np.savez_compressed(filename, np.vstack(features))
             logger.info('Simulate negative training examples for the '
                         'experimental spectra')
-            # TODO: Properly get negative training peptides: Shuffle peptides?
+            # Shuffle to get decoy peptides.
             features = [enc.encode(spec) for spec in tqdm.tqdm(
-                spectrum_simulator.simulate(peptides, charges),
+                spectrum_simulator.simulate(peptides, charges, True),
                 desc='Spectra encoded', leave=False, unit='spectra')]
             filename = f'{os.path.splitext(args.out)[0]}_sim_neg.npz'
             logger.info('Save simulated negative training spectra to %s',
