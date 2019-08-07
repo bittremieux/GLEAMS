@@ -8,9 +8,6 @@ import numba as nb
 import numpy as np
 
 
-random.seed(42)
-
-
 regex_non_alpha = re.compile('[^A-Za-z]+')
 regex_modifications = re.compile('[A-Z]?[-+]?\d*\.\d+|\d+')
 

@@ -1,3 +1,6 @@
+from gleams.embed import rndm
+rndm.set_seeds()
+
 import argparse
 import logging
 import os

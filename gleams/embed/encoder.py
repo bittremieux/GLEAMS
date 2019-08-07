@@ -11,9 +11,6 @@ from gleams.embed import spectrum
 from gleams.ms_io import ms_io
 from gleams.embed import utils
 
-# TODO: Set this globally when the script starts?
-random.seed(42)
-
 logger = logging.getLogger('gleams')
 
 
