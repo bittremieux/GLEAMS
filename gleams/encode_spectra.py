@@ -15,6 +15,18 @@ from gleams.embed import encoder
 from gleams.embed import theoretical
 from gleams.ms_io import ms_io
 
+
+# Fix logging hijacking by Tensorflow/abseil.
+# FIXME: https://github.com/abseil/abseil-py/issues/99
+# FIXME: https://github.com/tensorflow/tensorflow/issues/26691
+try:
+    import absl.logging
+    logging.root.removeHandler(absl.logging._absl_handler)
+    absl.logging._warn_preinit_stderr = False
+except Exception as e:
+    pass
+
+
 logger = logging.getLogger('gleams')
 
 
