@@ -8,7 +8,7 @@ import numpy as np
 from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams.embed import spectrum
-from gleams.io import ms_io
+from gleams.ms_io import ms_io
 from gleams.embed import utils
 
 # TODO: Set this globally when the script starts?

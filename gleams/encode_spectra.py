@@ -10,7 +10,7 @@ from gleams import config
 from gleams.embed import spectrum
 from gleams.embed import encoder
 from gleams.embed import theoretical
-from gleams.io import ms_io
+from gleams.ms_io import ms_io
 
 logger = logging.getLogger('gleams')
 
