@@ -1,7 +1,7 @@
 # Code taken from: https://keras.io/getting-started/faq/#how-can-i-obtain-reproducible-results-using-keras-during-development
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import random as rn
 
 
