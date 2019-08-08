@@ -1,6 +1,10 @@
 # Limit annoying Tensforflow logging to only warnings and errors.
 import os
+# 1: No FILTER logging.
+# 2: No WARNING logging.
+# 3: No ERROR logging.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
 from gleams.embed import rndm
 rndm.set_seeds()
 
