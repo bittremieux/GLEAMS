@@ -1,6 +1,9 @@
+import os
+
 import keras
 from keras import backend as K
 from keras import Input
+from keras.callbacks import CSVLogger, ModelCheckpoint
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
     MaxPooling1D, Reshape
 from keras.models import Model
@@ -79,7 +82,8 @@ class Embedder:
     """
 
     def __init__(self, num_precursor_features: int, num_fragment_features: int,
-                 num_ref_spectra_features: int, lr: float):
+                 num_ref_spectra_features: int, lr: float,
+                 filename: str = 'gleams.h5'):
         """
         Instantiate the Embbeder based on the given number of input features.
 
@@ -93,39 +97,33 @@ class Embedder:
             The number of input reference spectra features.
         lr : float
             The learning rate for the Adam optimizer.
+        filename : str
+            Filename to save the trained Keras model.
         """
         self.num_precursor_features = num_precursor_features
         self.num_fragment_features = num_fragment_features
         self.num_ref_spectra_features = num_ref_spectra_features
         self.lr = lr
+        self.filename = filename
 
         self.model = None
 
-    def save(self, filename: str):
+    def save(self):
         """
         Save a model and its training status.
-
-        Parameters
-        ----------
-        filename : str
-            The file name to save the model.
         """
         if self.model is None:
             raise ValueError('The model hasn\'t been constructed yet')
         else:
-            self.model.save(filename)
+            self.model.save(self.filename)
 
-    def load(self, filename: str):
+    def load(self):
         """
         Load a saved model and its training status from the given file.
-
-        Parameters
-        ----------
-        filename : str
-            The file name of the saved model to be loaded.
         """
         self.model = keras.models.load_model(
-            filename, custom_objects={'contrastive_loss': contrastive_loss})
+            self.filename,
+            custom_objects={'contrastive_loss': contrastive_loss})
 
     def _build_base_model(self) -> Model:
         """
@@ -228,8 +226,12 @@ class Embedder:
         if self.model is None:
             raise ValueError("The model hasn't been constructed yet")
 
-        # TODO: Callbacks.
+        # TODO: Monitor the validation loss for the ModelCheckPoint callback.
+        filename, ext = os.path.splitext(self.filename)
+        callbacks = [ModelCheckpoint(filename + '.{epoch:03d}' + ext,
+                                     period=5),
+                     CSVLogger(f'{filename}.log')]
         self.model.fit(
-            x_train, y_train, batch_size, num_epochs,
+            x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
             validation_data=((x_val, y_val) if x_val is not None and
                                                y_val is not None else None))

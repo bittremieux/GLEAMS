@@ -89,7 +89,8 @@ def main():
     # Build the embedder model.
     logger.info('Compile the GLEAMS siamese neural network')
     emb = embedder.Embedder(num_precursor_features, num_fragment_features,
-                            num_ref_spectra_features, config.lr)
+                            num_ref_spectra_features, config.lr,
+                            args.filename_model)
     emb.build_siamese_model()
 
     # Load the training and validation data.
@@ -137,7 +138,7 @@ def main():
         emb.train(x_train, y_train, config.batch_size, config.num_epochs)
 
         logger.info('Save the trained GLEAMS siamese neural network')
-        emb.save(args.filename_model)
+        emb.save()
 
     logger.info('Training completed')
 
