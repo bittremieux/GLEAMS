@@ -39,3 +39,5 @@ ms2pip_model = 'HCDch2'
 loss_label_certainty = 0.99
 margin = 1
 lr = 0.0002
+batch_size = 512
+num_epochs = 20

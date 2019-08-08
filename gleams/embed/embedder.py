@@ -222,3 +222,14 @@ class Embedder:
         self.model = Model(inputs=[*input_left, *input_right],
                            outputs=distance)
         self.model.compile(Adam(self.lr), contrastive_loss)
+
+    def train(self, x_train, y_train, batch_size: int, num_epochs: int,
+              x_val=None, y_val=None):
+        if self.model is None:
+            raise ValueError("The model hasn't been constructed yet")
+
+        # TODO: Callbacks.
+        self.model.fit(
+            x_train, y_train, batch_size, num_epochs,
+            validation_data=((x_val, y_val) if x_val is not None and
+                                               y_val is not None else None))
