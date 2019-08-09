@@ -1,6 +1,8 @@
 import os
 
 import keras
+import numpy as np
+import pandas as pd
 from keras import backend as K
 from keras import Input
 from keras.callbacks import CSVLogger, ModelCheckpoint
@@ -8,6 +10,7 @@ from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
     MaxPooling1D, Reshape
 from keras.models import Model
 from keras.optimizers import Adam
+from sklearn.metrics import auc, roc_curve
 
 from gleams import config
 
@@ -228,10 +231,52 @@ class Embedder:
 
         # TODO: Monitor the validation loss for the ModelCheckPoint callback.
         filename, ext = os.path.splitext(self.filename)
-        callbacks = [ModelCheckpoint(filename + '.{epoch:03d}' + ext,
+        filename_log = f'{filename}.log'
+        # CrocHistory has to be added after CSVLogger because it uses the same
+        # log file.
+        callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext,
                                      period=5),
-                     CSVLogger(f'{filename}.log')]
+                     CSVLogger(filename_log),
+                     CrocHistory(x_val, y_val, filename_log)]
         self.model.fit(
             x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
             validation_data=((x_val, y_val) if x_val is not None and
                                                y_val is not None else None))
+
+    def predict(self, x):
+        return self.model.predict(x)
+
+
+class CrocHistory(keras.callbacks.Callback):
+    """
+    Track the AUC CROC on the validation data after each epoch ends.
+    """
+
+    # Alpha = 14 maps x = 0.05 to 0.5.
+    alpha = 14
+
+    def __init__(self, x_val, y_val, log_filename=None):
+        super().__init__()
+        
+        self.x_val = x_val
+        self.y_val = y_val
+        self.log_filename = log_filename
+        self.croc_aucs = None
+
+    def on_train_begin(self, logs=None):
+        self.croc_aucs = []
+
+    def on_epoch_end(self, epoch, logs=None):
+        if self.x_val is not None:
+            y_pred = self.model.predict(self.x_val)
+            fpr, tpr, _ = roc_curve(self.y_val, 1 - y_pred / y_pred.max())
+            # Expontial CROC transformation from Swamidass et al. 2010.
+            croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
+                        (1 - np.exp(-self.alpha)))
+            self.croc_aucs.append(auc(croc_fpr, tpr))
+
+    def on_train_end(self, logs=None):
+        if self.log_filename is not None and len(self.croc_aucs) > 0:
+            df_log = pd.read_csv(self.log_filename)
+            df_log['croc_auc'] = self.croc_aucs
+            df_log.to_csv(self.log_filename, index=False)
