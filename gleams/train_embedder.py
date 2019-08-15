@@ -105,26 +105,19 @@ def main():
         x_exp = f_exp['arr_0']
         x_sim_pos, x_sim_neg = f_sim_pos['arr_0'], f_sim_neg['arr_0']
         # Combine features and labels.
-        # TODO: How to compose the training data?
         x_exp = np.tile(x_exp, (2, 1))
         x_exp = [x_exp[:, :num_precursor_features],
                  x_exp[:, num_precursor_features:
                           num_precursor_features + num_fragment_features],
                  x_exp[:, num_precursor_features + num_fragment_features:]]
-        # TODO: How to compose the training data?
         x_sim = np.concatenate((x_sim_pos, x_sim_neg))
-        # x_sim = np.concatenate((x_sim_pos[:len(x_sim_pos) // 2],
-        #                         x_sim_neg[len(x_sim_neg) // 2:]))
         x_sim = [x_sim[:, :num_precursor_features],
                  x_sim[:, num_precursor_features:
                           num_precursor_features + num_fragment_features],
                  x_sim[:, num_precursor_features + num_fragment_features:]]
         x_train = [*x_exp, *x_sim]
-        # TODO: How to compose the training data?
         y_train = np.hstack([np.ones(len(x_sim_pos)),
                              np.zeros(len(x_sim_neg))])
-        # y_train = np.hstack([np.ones(len(x_sim_pos) // 2),
-        #                      np.zeros(len(x_sim_neg) // 2)])
 
         # Train the embedder.
         logger.info('Train the GLEAMS siamese neural network using %d training'
