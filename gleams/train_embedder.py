@@ -75,19 +75,15 @@ def main():
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    # TODO: Find a better way to retrieve this information.
-    num_bits_mz = config.num_bits_precursor_mz
-    num_bits_mass = config.num_bits_precursor_mass
-    charge_max = config.precursor_charge_max
-    num_precursor_features = num_bits_mz + num_bits_mass + charge_max
-    min_mz = config.fragment_mz_min
-    max_mz = config.fragment_mz_max
-    bin_size = config.bin_size
-    num_fragment_features = spectrum.get_num_bins(min_mz, max_mz, bin_size)
-    num_ref_spectra_features = 500  # config.max_num_ref_spectra
-
     # Build the embedder model.
     logger.info('Compile the GLEAMS siamese neural network')
+    num_precursor_features = (config.num_bits_precursor_mz +
+                              config.num_bits_precursor_mass +
+                              config.precursor_charge_max)
+    num_fragment_features = spectrum.get_num_bins(config.fragment_mz_min,
+                                                  config.fragment_mz_max,
+                                                  config.bin_size)
+    num_ref_spectra_features = config.num_ref_spectra
     emb = embedder.Embedder(num_precursor_features, num_fragment_features,
                             num_ref_spectra_features, config.lr,
                             args.filename_model)
