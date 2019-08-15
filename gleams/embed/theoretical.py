@@ -31,7 +31,7 @@ class PrintSuppressor:
         self.stdout = sys.stdout
         sys.stdout = self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         sys.stdout = self.stdout
 
     def write(self, x):
