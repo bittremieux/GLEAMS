@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from keras import backend as K
 from keras import Input
-from keras.callbacks import CSVLogger, ModelCheckpoint
+from keras.callbacks import CSVLogger, ModelCheckpoint, TensorBoard
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
     MaxPooling1D, Reshape
 from keras.models import Model
@@ -235,7 +235,8 @@ class Embedder:
         # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
                      CSVLogger(filename_log),
-                     CrocHistory(x_val, y_val, filename_log)]
+                     CrocHistory(x_val, y_val, filename_log),
+                     TensorBoard('/tmp/gleams', update_freq='batch')]
         self.model.fit(
             x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
             validation_data=((x_val, y_val)
