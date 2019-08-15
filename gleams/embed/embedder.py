@@ -229,13 +229,11 @@ class Embedder:
         if self.model is None:
             raise ValueError("The model hasn't been constructed yet")
 
-        # TODO: Monitor the validation loss for the ModelCheckPoint callback.
         filename, ext = os.path.splitext(self.filename)
         filename_log = f'{filename}.log'
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
-        callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext,
-                                     period=5),
+        callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
                      CSVLogger(filename_log),
                      CrocHistory(x_val, y_val, filename_log)]
         self.model.fit(
