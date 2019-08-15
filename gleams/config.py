@@ -34,6 +34,7 @@ fragment_mz_tol = 0.05
 
 # Theoretical spectrum simulation.
 ms2pip_model = 'HCDch2'
+ms2pip_batch_size = 100000
 
 # Neural network hyperparameters.
 loss_label_certainty = 0.99
