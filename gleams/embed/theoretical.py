@@ -11,7 +11,7 @@ from pyteomics.mass import fast_mass
 from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams import config
-from gleams.embed import utils
+from gleams.embed import spectrum, utils
 
 # We need to explicitly add the MS2PIP directory to the path because we're not
 # using MS2PIP as a stand-alone script.
@@ -164,7 +164,19 @@ class SpectrumSimulator:
                 intensity = np.asarray(
                     2 ** predictions.loc[spec_id, 'prediction'] - 0.001)
                 intensity_mask = intensity > 0
-                intensity = intensity[intensity_mask]
+                intensity = spectrum._norm_intensity(intensity[intensity_mask])
                 mz = np.asarray(predictions.loc[spec_id, 'mz'])[intensity_mask]
-                yield MsmsSpectrum(f'ms2pip_{peptide}', precursor_mz, charge,
-                                   mz, intensity, peptide=peptide)
+                spec = MsmsSpectrum(f'ms2pip_{peptide}', precursor_mz, charge,
+                                    mz, intensity, peptide=peptide)
+                # Do some minimal spectrum preprocessing similar to the
+                # experimental spectra.
+                # Explicitly preprocess like this to avoid throwing out
+                # "low-quality" simulated spectra.
+                spec = spec.set_mz_range(config.fragment_mz_min,
+                                         config.fragment_mz_max)
+                scaling = ('root' if config.scaling == 'sqrt' else
+                           config.scaling)
+                if scaling is not None:
+                    spec = spec.scale_intensity(scaling,
+                                                max_rank=config.max_peaks_used)
+                yield spec
