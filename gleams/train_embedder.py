@@ -46,17 +46,18 @@ def _declare_args() -> argparse.Namespace:
     """
     # IO arguments.
     parser = argparse.ArgumentParser(description='Train the GLEAMS embedder')
-    parser.add_argument('filename_spectra_enc_exp',
-                        help='encoded experimental spectra filename (needs to '
-                             'have a .npz extension)')
-    parser.add_argument('filename_spectra_enc_sim_pos',
-                        help='encoded simulated positive spectra filename '
-                             'corresponding to the encoded experimental '
-                             'spectra (needs to have a .npz extension)')
-    parser.add_argument('filename_spectra_enc_sim_neg',
-                        help='encoded simulated negative spectra filename '
-                             'corresponding to the encoded experimental '
-                             'spectra (needs to have a .npz extension)')
+    parser.add_argument('--filename_base_train', required=True,
+                        help='base filename for the training features; all '
+                             'files matching {base}.npz (experimental spectra '
+                             'features), {base}_sim_pos.npz (simulated '
+                             'positive features), and {base}_sim_neg.npz '
+                             '(simulated negative features) should exist')
+    parser.add_argument('--filename_base_val',
+                        help='base filename for the validation features; all '
+                             'files matching {base}.npz (experimental spectra '
+                             'features), {base}_sim_pos.npz (simulated '
+                             'positive features), and {base}_sim_neg.npz '
+                             '(simulated negative features) should exist')
     parser.add_argument('--filename_model', required=True,
                         help='output GLEAMS model filename')
 
@@ -89,18 +90,50 @@ def main():
                             args.filename_model)
     emb.build_siamese_model()
 
+    # Make sure all feature files exist.
+    base_filenames = [args.filename_base_train]
+    if args.filename_base_val is not None:
+        base_filenames.append(args.filename_base_val)
+    else:
+        logger.debug('No validation will be performed because no validation '
+                     'features have been provided')
+    for base_filename in base_filenames:
+        for filename in [f'{base_filename}.npz',
+                         f'{base_filename}_sim_pos.npz',
+                         f'{base_filename}_sim_neg.npz']:
+            if not os.path.isfile(filename):
+                raise ValueError(f'Missing file {filename}')
     # Load the training and validation data.
-    for filename in [args.filename_spectra_enc_exp,
-                     args.filename_spectra_enc_sim_pos,
-                     args.filename_spectra_enc_sim_neg]:
-        if os.path.splitext(filename)[1] != '.npz':
-            raise ValueError(f'Invalid extension for the encoded spectra '
-                             f'{filename}; should be .npz')
-    # TODO: Include validation data.
-    with np.load(args.filename_spectra_enc_exp) as f_exp,\
-            np.load(args.filename_spectra_enc_sim_pos) as f_sim_pos,\
-            np.load(args.filename_spectra_enc_sim_neg) as f_sim_neg:
-        logger.info('Load all encoded spectra features')
+    logger.info('Load all encoded spectra features')
+    x_train, y_train = _load_features(args.filename_base_train,
+                                      num_precursor_features,
+                                      num_fragment_features)
+    x_val, y_val = (_load_features(args.filename_base_val,
+                                   num_precursor_features,
+                                   num_fragment_features)
+                    if args.filename_base_val is not None
+                    else (None, None))
+
+    # Train the embedder.
+    num_pos = y_train.sum()
+    num_neg = len(y_train) - num_pos
+    logger.info('Train the GLEAMS siamese neural network using %d training '
+                'samples (%d positive training samples, %d negative '
+                'training samples)', len(y_train), num_pos, num_neg)
+    emb.train(x_train, y_train, config.batch_size, config.num_epochs,
+              x_val, y_val)
+
+    logger.info('Save the trained GLEAMS siamese neural network')
+    emb.save()
+
+    logger.info('Training completed')
+
+
+def _load_features(base_filename: str, num_precursor_features: int,
+                   num_fragment_features: int):
+    with np.load(f'{base_filename}.npz') as f_exp,\
+            np.load(f'{base_filename}_sim_pos.npz') as f_sim_pos,\
+            np.load(f'{base_filename}_sim_neg.npz') as f_sim_neg:
         # Load all features.
         x_exp = f_exp['arr_0']
         x_sim_pos, x_sim_neg = f_sim_pos['arr_0'], f_sim_neg['arr_0']
@@ -115,21 +148,10 @@ def main():
                  x_sim[:, num_precursor_features:
                           num_precursor_features + num_fragment_features],
                  x_sim[:, num_precursor_features + num_fragment_features:]]
-        x_train = [*x_exp, *x_sim]
-        y_train = np.hstack([np.ones(len(x_sim_pos)),
-                             np.zeros(len(x_sim_neg))])
+        x = [*x_exp, *x_sim]
+        y = np.hstack([np.ones(len(x_sim_pos)), np.zeros(len(x_sim_neg))])
 
-        # Train the embedder.
-        logger.info('Train the GLEAMS siamese neural network using %d training'
-                    ' samples (%d positive training samples, %d negative '
-                    'training samples)', len(y_train), len(x_sim_pos),
-                    len(x_sim_neg))
-        emb.train(x_train, y_train, config.batch_size, config.num_epochs)
-
-        logger.info('Save the trained GLEAMS siamese neural network')
-        emb.save()
-
-    logger.info('Training completed')
+        return x, y
 
 
 if __name__ == '__main__':

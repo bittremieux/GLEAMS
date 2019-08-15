@@ -240,8 +240,9 @@ class Embedder:
                      CrocHistory(x_val, y_val, filename_log)]
         self.model.fit(
             x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
-            validation_data=((x_val, y_val) if x_val is not None and
-                                               y_val is not None else None))
+            validation_data=((x_val, y_val)
+                             if x_val is not None and y_val is not None
+                             else None))
 
     def predict(self, x):
         return self.model.predict(x)
@@ -257,7 +258,7 @@ class CrocHistory(keras.callbacks.Callback):
 
     def __init__(self, x_val, y_val, log_filename=None):
         super().__init__()
-        
+
         self.x_val = x_val
         self.y_val = y_val
         self.log_filename = log_filename
