@@ -114,7 +114,7 @@ def _declare_args() -> argparse.Namespace:
                              'spectrum dot product against reference spectra '
                              '(default: %(default)s m/z)')
     parser.add_argument('--max_num_ref_spectra',
-                        default=config.max_num_ref_spectra, type=int,
+                        default=config.num_ref_spectra, type=int,
                         help='maximum number of reference spectra used '
                              '(default: all spectra in the reference spectra '
                              'file)')

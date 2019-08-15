@@ -29,7 +29,7 @@ bin_size = utils.averagine_peak_separation_da
 
 # Reference spectra encoding.
 ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mgf')
-max_num_ref_spectra = None
+num_ref_spectra = 500
 fragment_mz_tol = 0.05
 
 # Theoretical spectrum simulation.

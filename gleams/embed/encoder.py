@@ -169,7 +169,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
     """
 
     def __init__(self, filename: str, min_mz: float, max_mz: float,
-                 fragment_mz_tol: float, max_num_ref_spectra: int = None):
+                 fragment_mz_tol: float, num_ref_spectra: int):
         """
         Instantiate a ReferenceSpectraEncoder by vectorizing the reference
         spectra in the given file.
@@ -185,9 +185,9 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
         fragment_mz_tol : float
             The fragment m/z tolerance used to compute the spectrum dot
             product to the reference spectra.
-        max_num_ref_spectra : int
-            Maximum number of reference spectra to consider. If None, all
-            reference spectra are used.
+        num_ref_spectra : int
+            Maximum number of reference spectra to consider. An error is raised
+            if this exceeds the number of available reference spectra.
         """
         super().__init__()
 
@@ -195,11 +195,14 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
 
         logger.debug('Read the reference spectra')
         ref_spectra = list(ms_io.get_spectra(filename))
-        if (max_num_ref_spectra is not None and
-                len(ref_spectra) > max_num_ref_spectra):
+        if len(ref_spectra) < num_ref_spectra:
+            raise ValueError(f'Insufficient number of reference spectra '
+                             f'({len(ref_spectra)} available, '
+                             f'{num_ref_spectra} required)')
+        elif len(ref_spectra) > num_ref_spectra:
             logger.debug('Select %d reference spectra (was %d)',
-                         len(ref_spectra), max_num_ref_spectra)
-            ref_spectra = random.sample(ref_spectra, max_num_ref_spectra)
+                         len(ref_spectra), num_ref_spectra)
+            ref_spectra = random.sample(ref_spectra, num_ref_spectra)
         logger.debug('Vectorize the reference spectra')
         self.ref_spectra = [spec for spec in ref_spectra
                             if (spectrum.preprocess(spec, min_mz, max_mz)
