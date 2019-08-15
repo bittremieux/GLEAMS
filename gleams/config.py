@@ -36,9 +36,12 @@ fragment_mz_tol = 0.05
 ms2pip_model = 'HCDch2'
 ms2pip_batch_size = 100000
 
-# Neural network hyperparameters.
+
+# Neural network settings.
+
+# Training hyperparameters.
 loss_label_certainty = 0.99
 margin = 1
 lr = 0.0002
-batch_size = 512
-num_epochs = 20
+batch_size = 1024
+num_epochs = 60
