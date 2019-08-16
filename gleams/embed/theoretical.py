@@ -118,13 +118,13 @@ class SpectrumSimulator:
                                                           charges_batch)):
                     peptide_no_mod = utils.normalize_peptide(peptide)
                     # Shuffle the peptide to generate a decoy if necessary.
-                    aa_order = np.arange(len(peptide_no_mod))
+                    aa_order = np.arange(len(peptide_no_mod) + 1)
                     if decoy:
                         # Keep the N-terminal and C-terminal amino acids in
                         # place.
-                        np.random.shuffle(aa_order[1:-1])
+                        np.random.shuffle(aa_order[2:-1])
                         peptide_no_mod = ''.join(
-                            np.asarray(list(peptide_no_mod))[aa_order])
+                            np.asarray(list(peptide_no_mod))[aa_order[1:] - 1])
                     # Specify the positions of the modifications.
                     pep_mods, peptide_mods_md = [], 0.
                     for md, aa, pos in utils.get_peptide_modifications(
