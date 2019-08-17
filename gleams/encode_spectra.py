@@ -129,11 +129,11 @@ def main():
                     charges.append(spec.precursor_mz)
                 spec_i += 1
 
-            if (args.max_num_spectra is not None and
-                    spec_i == args.max_num_spectra):
-                logger.info('Stopping early after encoding %d spectra',
-                            args.max_num_spectra)
-                break
+        if (args.max_num_spectra is not None and
+                spec_i >= args.max_num_spectra):
+            logger.info('Stopping early after encoding at least %d spectra',
+                        args.max_num_spectra)
+            break
 
     if len(features) > 0:
         logger.info('Save encoded spectra to %s', os.path.basename(args.out))
