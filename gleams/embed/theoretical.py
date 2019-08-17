@@ -27,19 +27,6 @@ from ms2pip_c import ms2pipC
 logger = logging.getLogger('gleams')
 
 
-class PrintSuppressor:
-
-    def __enter__(self):
-        self.stdout = sys.stdout
-        sys.stdout = self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        sys.stdout = self.stdout
-
-    def write(self, x):
-        pass
-
-
 class SpectrumSimulator:
     """
     Simulate theoretical spectra using MS2PIP.
@@ -160,10 +147,9 @@ class SpectrumSimulator:
                 f_config.seek(0)
                 logger.debug('Write MS2PIP spectrum predictions to '
                              '%s_predictions.csv', f_out.name)
-                with PrintSuppressor():
-                    ms2pipC.run(f_pep.name, config_file=f_config.name,
-                                num_cpu=os.cpu_count(),
-                                output_filename=f_out.name)
+                ms2pipC.run(f_pep.name, config_file=f_config.name,
+                            num_cpu=os.cpu_count(),
+                            output_filename=f_out.name)
 
                 # Collect the MS2PIP predictions.
                 predictions = pd.read_csv(f'{f_out.name}_predictions.csv',
