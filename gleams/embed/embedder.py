@@ -234,8 +234,8 @@ class Embedder:
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
-                     CSVLogger(filename_log),
                      CrocHistory(x_val, y_val, filename_log),
+                     CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
         self.model.fit(
             x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
@@ -273,10 +273,6 @@ class CrocHistory(keras.callbacks.Callback):
             # Expontial CROC transformation from Swamidass et al. 2010.
             croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
                         (1 - np.exp(-self.alpha)))
-            self.croc_aucs.append(auc(croc_fpr, tpr))
-
-    def on_train_end(self, logs=None):
-        if self.log_filename is not None and len(self.croc_aucs) > 0:
-            df_log = pd.read_csv(self.log_filename)
-            df_log['croc_auc'] = self.croc_aucs
-            df_log.to_csv(self.log_filename, index=False)
+            croc_auc = auc(croc_fpr, tpr)
+            self.croc_aucs.append(croc_auc)
+            logs['croc_auc'] = auc(croc_fpr, tpr)
