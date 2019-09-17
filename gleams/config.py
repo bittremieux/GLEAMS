@@ -36,6 +36,9 @@ fragment_mz_tol = 0.05
 ms2pip_model = 'HCDch2'
 ms2pip_batch_size = 100000
 
+# Pair generation.
+pair_mz_tolerance = 0.2
+
 
 # Neural network settings.
 
