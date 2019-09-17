@@ -98,7 +98,8 @@ def main():
         logger.debug('No validation will be performed because no validation '
                      'features have been provided')
     for base_filename in base_filenames:
-        for filename in [f'{base_filename}.npz',
+        for filename in [f'{base_filename}_real_pos.npz',
+                         f'{base_filename}_real_neg.npz',
                          f'{base_filename}_sim_pos.npz',
                          f'{base_filename}_sim_neg.npz']:
             if not os.path.isfile(filename):
@@ -131,25 +132,28 @@ def main():
 
 def _load_features(base_filename: str, num_precursor_features: int,
                    num_fragment_features: int):
-    with np.load(f'{base_filename}.npz') as f_exp,\
+    with np.load(f'{base_filename}_real_pos.npz') as f_real_pos,\
+            np.load(f'{base_filename}_real_neg.npz') as f_real_neg,\
             np.load(f'{base_filename}_sim_pos.npz') as f_sim_pos,\
             np.load(f'{base_filename}_sim_neg.npz') as f_sim_neg:
         # Load all features.
-        x_exp = f_exp['arr_0']
-        x_sim_pos, x_sim_neg = f_sim_pos['arr_0'], f_sim_neg['arr_0']
-        # Combine features and labels.
-        x_exp = np.tile(x_exp, (2, 1))
-        x_exp = [x_exp[:, :num_precursor_features],
-                 x_exp[:, num_precursor_features:
-                          num_precursor_features + num_fragment_features],
-                 x_exp[:, num_precursor_features + num_fragment_features:]]
-        x_sim = np.concatenate((x_sim_pos, x_sim_neg))
-        x_sim = [x_sim[:, :num_precursor_features],
-                 x_sim[:, num_precursor_features:
-                          num_precursor_features + num_fragment_features],
-                 x_sim[:, num_precursor_features + num_fragment_features:]]
-        x = [*x_exp, *x_sim]
-        y = np.hstack([np.ones(len(x_sim_pos)), np.zeros(len(x_sim_neg))])
+        x1 = np.concatenate((f_real_pos['arr_0'], f_real_neg['arr_0'],
+                             f_sim_pos['arr_0'], f_sim_neg['arr_0']))
+        x2 = np.concatenate((f_real_pos['arr_1'], f_real_neg['arr_1'],
+                             f_sim_pos['arr_1'], f_sim_neg['arr_1']))
+        x1 = [x1[:, :num_precursor_features],
+              x1[:, num_precursor_features:
+                    num_precursor_features + num_fragment_features],
+              x1[:, num_precursor_features + num_fragment_features:]]
+        x2 = [x2[:, :num_precursor_features],
+              x2[:, num_precursor_features:
+                    num_precursor_features + num_fragment_features],
+              x2[:, num_precursor_features + num_fragment_features:]]
+        x = [*x1, *x2]
+        y = np.hstack([np.ones(len(f_real_pos['arr_0'])),
+                       np.zeros(len(f_real_neg['arr_0'])),
+                       np.ones(len(f_sim_pos['arr_0'])),
+                       np.zeros(len(f_sim_neg['arr_0']))])
 
         return x, y
 

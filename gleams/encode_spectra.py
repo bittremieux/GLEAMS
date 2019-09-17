@@ -17,9 +17,7 @@ import pandas as pd
 import tqdm
 
 from gleams import config
-from gleams.embed import spectrum
-from gleams.embed import encoder
-from gleams.embed import theoretical
+from gleams.embed import encoder, spectrum
 from gleams.ms_io import ms_io
 
 
@@ -47,26 +45,17 @@ def _declare_args() -> argparse.Namespace:
     argparse.Namespace
         The command-line argument namespace.
     """
-    # IO arguments.
     parser = argparse.ArgumentParser(description='Encode MS/MS spectra')
     parser.add_argument('spectra_filenames', nargs='+',
                         help='input spectrum files (in the mzML or mzXML '
                              'format, optionally compressed using gzip or xz)')
-    parser.add_argument('--out', required=True,
-                        help='output spectrum features file (the .npz '
-                             'extension will be appended to the file name if '
-                             'it does not already have one)')
-
-    parser.add_argument('--max_num_spectra', default=None, type=int,
-                        help='maximum number of spectra to encode (default: '
-                             'all spectra in the specified file(s))')
     parser.add_argument('--metadata',
                         help='comma-separated metadata file with spectrum '
                              'identifications (expected columns: filename, '
                              'scan, sequence, charge)')
-    parser.add_argument('--simulate_training_spectra', action='store_true',
-                        help='simulate theoretical spectra to be used as '
-                             'training data for the GLEAMS neural network')
+    parser.add_argument('--spectrum_pairs', action='store_true',
+                        help='generate spectrum to be used as training data '
+                             'for the GLEAMS neural network')
     parser.add_argument('--debug', action='store_true',
                         help='enable detailed debug logging')
 
@@ -104,74 +93,61 @@ def main():
         metadata_df = None
 
     # Read the spectra from the file(s).
-    features, peptides, charges = [], [], []
-    spec_i = 0
+    spectra = {}
     for file_i, spec_file in enumerate(args.spectra_filenames, 1):
         spec_file_base = os.path.basename(spec_file)
         logger.info('Process file %s [%d/%d]', spec_file_base, file_i,
                     len(args.spectra_filenames))
-        if metadata_df is not None and spec_file_base not in metadata_df.index:
+        if metadata_df is None:
+            metadata_file = None
+        elif spec_file_base in metadata_df.index:
+            metadata_file = metadata_df.loc[spec_file_base]
+        else:
             logger.warning('File %s not specified in the metadata, '
                            'skipping...', spec_file_base)
             continue
         for spec in tqdm.tqdm(ms_io.get_spectra(spec_file),
-                              desc='Spectra encoded', leave=False,
+                              desc='Spectra read', leave=False,
                               unit='spectra'):
-            if ((metadata_df is None or
-                 (spec_file_base, int(spec.identifier)) in metadata_df.index)
+            if ((metadata_file is None or
+                 spec.identifier in metadata_file.index)
                     and spectrum.preprocess(spec, config.fragment_mz_min,
                                             config.fragment_mz_max).is_valid):
-                features.append(enc.encode(spec))
-                if metadata_df is not None:
-                    peptides.append(
-                        metadata_df.loc[(spec_file_base, int(spec.identifier)),
-                                        'sequence'])
-                    charges.append(spec.precursor_mz)
-                spec_i += 1
+                spectra[spec.identifier] = spec
 
-        if (args.max_num_spectra is not None and
-                spec_i >= args.max_num_spectra):
-            logger.info('Stopping early after encoding at least %d spectra',
-                        args.max_num_spectra)
-            break
-
-    if len(features) > 0:
-        logger.info('Save encoded spectra to %s', os.path.basename(args.out))
-        np.savez_compressed(args.out, np.vstack(features))
-    else:
-        logger.warning('No spectra selected for encoding')
-
-    # Encode corresponding positive and negative training theoretical spectra.
-    if args.simulate_training_spectra:
-        if metadata_df is None:
-            logger.warning('Unable to simulate theoretical spectra because no '
-                           'metadata including spectrum identifications has '
-                           'been provided')
-        elif len(peptides) == 0:
-            logger.warning('Unable to simulate theoretical spectra because no '
-                           'spectra were selected for encoding')
+        if not args.spectrum_pairs:
+            # No pairs needed, just encode and export the spectra.
+            if len(spectra) > 0:
+                features = [enc.encode(spec) for spec in spectra.values()]
+                np.savez_compressed(os.path.splitext(spec_file)[0] + '.npz',
+                                    np.vstack(features))
+            else:
+                logger.warning('No spectra selected for encoding')
         else:
-            spectrum_simulator = theoretical.SpectrumSimulator(
-                config.ms2pip_model)
-            logger.info('Simulate positive training examples for the '
-                        'experimental spectra')
-            features = [enc.encode(spec) for spec in tqdm.tqdm(
-                spectrum_simulator.simulate(peptides, charges),
-                desc='Spectra encoded', leave=False, unit='spectra')]
-            filename = f'{os.path.splitext(args.out)[0]}_sim_pos.npz'
-            logger.info('Save simulated positive training spectra to %s',
-                        os.path.basename(filename))
-            np.savez_compressed(filename, np.vstack(features))
-            logger.info('Simulate negative training examples for the '
-                        'experimental spectra')
-            # Shuffle to get decoy peptides.
-            features = [enc.encode(spec) for spec in tqdm.tqdm(
-                spectrum_simulator.simulate(peptides, charges, True),
-                desc='Spectra encoded', leave=False, unit='spectra')]
-            filename = f'{os.path.splitext(args.out)[0]}_sim_neg.npz'
-            logger.info('Save simulated negative training spectra to %s',
-                        os.path.basename(filename))
-            np.savez_compressed(filename, np.vstack(features))
+            # Generate training spectrum pairs.
+            if metadata_file is None:
+                logger.warning('Unable to generate spectrum pairs because no '
+                               'metadata with spectrum identifications has '
+                               'been provided')
+            elif len(spectra) == 0:
+                logger.warning('Unable to generate spectrum pairs because no '
+                               'spectra were selected for encoding')
+            else:
+                logger.info('Generate encoded spectrum pairs')
+                pair_generator = encoder.PairGenerator().set_spectra(
+                    spectra, metadata_file)
+                pair_options = [(True, True, 'real_pos'),
+                                (True, False, 'real_neg'),
+                                (False, True, 'sim_pos'),
+                                (False, False, 'sim_neg')]
+                for real, positive, pair_str in pair_options:
+                    spectra1, spectra2 = zip(*pair_generator.generate_pairs(
+                        real, positive))
+                    features1 = [enc.encode(spec) for spec in spectra1]
+                    features2 = [enc.encode(spec) for spec in spectra2]
+                    np.savez_compressed(
+                        f'{os.path.splitext(spec_file)[0]}_{pair_str}.npz',
+                        np.vstack(features1), np.vstack(features2))
 
     logger.info('Encoding completed')
 
