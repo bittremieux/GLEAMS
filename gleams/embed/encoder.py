@@ -365,9 +365,9 @@ class PairGenerator:
             logger.info('Compile real–simulated %s spectrum pairs for %d '
                         'spectra', 'positive' if positive else 'negative',
                         len(self.spectra))
-            spec_i = [spec.identifier for spec in self.spectra.values()]
-            yield from zip(self.spectra.values(),
-                           self.spectrum_simulator.simulate(
-                               self.metadata.loc[spec_i, 'sequence'],
-                               self.metadata.loc[spec_i, 'charge'],
-                               not positive))
+            yield from zip(
+                self.spectra.values(),
+                self.spectrum_simulator.simulate(
+                    self.metadata.loc[self.spectra.keys(), 'sequence'],
+                    self.metadata.loc[self.spectra.keys(), 'charge'],
+                    not positive))
