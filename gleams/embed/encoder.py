@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 import random
-from typing import Dict, Generator, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -316,7 +316,7 @@ class PairGenerator:
         return self
 
     def generate_pairs(self, real: bool = True, positive: bool = True)\
-            -> Generator[Tuple[MsmsSpectrum, MsmsSpectrum], None, None]:
+            -> Iterable[Tuple[MsmsSpectrum, MsmsSpectrum]]:
         """
         Generator producing spectrum pairs.
 
@@ -330,7 +330,7 @@ class PairGenerator:
 
         Returns
         -------
-        Generator[Tuple[MsmsSpectrum, MsmsSpectrum], None, None]
+        Iterable[Tuple[MsmsSpectrum, MsmsSpectrum]]
             A generator of spectrum–spectrum tuples.
         """
         if self.spectra is None or self.metadata is None:
