@@ -98,12 +98,12 @@ def main():
 
     if args.metadata is not None:
         logging.info('Read metadata file %s', os.path.basename(args.metadata))
-        metadata_df = pd.read_csv(args.metadata)
+        metadata_df = pd.read_csv(args.metadata).astype({'scan': str})
         metadata_df.set_index(['filename', 'scan'], inplace=True)
     else:
         metadata_df = None
 
-    # Encode experimental spectra.
+    # Read the spectra from the file(s).
     features, peptides, charges = [], [], []
     spec_i = 0
     for file_i, spec_file in enumerate(args.spectra_filenames, 1):
