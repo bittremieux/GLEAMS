@@ -113,7 +113,6 @@ def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
         metadata = pd.read_csv(os.path.join(
             os.environ['GLEAMS_HOME'], 'data', 'massivekb',
             f'metadata_{massivekb_task_id}.csv'))
-
         metadata['row_num'] = range(len(metadata.index))
         pairs = metadata.groupby(['sequence', 'charge'])['row_num'].apply(
             lambda x: pd.DataFrame(
@@ -150,14 +149,21 @@ def generate_massivekb_pairs_negative(massivekb_task_id: str,
         metadata = pd.read_csv(os.path.join(
             os.environ['GLEAMS_HOME'], 'data', 'massivekb',
             f'metadata_{massivekb_task_id}.csv'))
+        metadata['row_num'] = range(len(metadata.index))
+        metadata.sort_values('mz', inplace=True)
+        metadata.reset_index(inplace=True)
 
-        pairs = set()
-        for (row_num1, peptide1, mz1), (row_num2, peptide2, mz2) in\
-                itertools.product(
-                    *itertools.tee(zip(range(len(metadata.index)),
-                                       metadata['sequence'],
-                                       metadata['mz']))):
-            if peptide1 != peptide2 and abs(mz1 - mz2) <= mz_tolerance:
-                pairs.add(tuple(sorted((row_num1, row_num2))))
+        pairs = []
+        for i, (row_num1, peptide1, mz1) in enumerate(zip(
+                metadata['row_num'], metadata['sequence'], metadata['mz'])):
+            for row_num2, peptide2, mz2 in zip(
+                    metadata.loc[i + 1:, 'row_num'],
+                    metadata.loc[i + 1:, 'sequence'],
+                    metadata.loc[i + 1:, 'mz']):
+                if mz2 - mz1 <= mz_tolerance:
+                    if peptide1 != peptide2:
+                        pairs.append((row_num1, row_num2))
+                else:
+                    break
         logger.debug('Save negative pair indexes to %s', filename)
         pd.DataFrame(pairs).to_csv(filename, header=False, index=False)
