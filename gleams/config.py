@@ -1,5 +1,9 @@
 from gleams.embed import utils
 
+# MassIVE-KB metadata processing.
+massivekb_task_id = '82c0124b'  # Version 2018-06-15.
+mz_tolerance = 0.2
+
 # MS/MS spectrum preprocessing settings.
 
 # Minimum number of peaks for an MS/MS spectrum to be considered.
