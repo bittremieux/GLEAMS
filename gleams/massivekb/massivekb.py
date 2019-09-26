@@ -1,3 +1,4 @@
+import functools
 import itertools
 import logging
 import os
@@ -131,11 +132,13 @@ def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
             os.environ['GLEAMS_HOME'], 'data', 'massivekb',
             f'metadata_{massivekb_task_id}.csv'))
         metadata['row_num'] = range(len(metadata.index))
-        pairs = metadata.groupby(['sequence', 'charge'])['row_num'].apply(
-            lambda x: pd.DataFrame(
-                itertools.combinations_with_replacement(x, 2)))
+        same_row_nums = metadata.groupby(['sequence', 'charge'])['row_num']
         logger.debug('Save positive pair indexes to %s', filename)
-        pairs.to_csv(filename, header=False, index=False)
+        with open(filename, 'w') as f_out:
+            for p1, p2 in itertools.chain(
+                    *(same_row_nums.apply(functools.partial(
+                        itertools.combinations_with_replacement, r=2)))):
+                f_out.write(f'{p1},{p2}\n')
 
 
 def generate_massivekb_pairs_negative(massivekb_task_id: str,
