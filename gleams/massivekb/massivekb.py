@@ -45,14 +45,13 @@ def convert_massivekb_metadata(massivekb_task_id: str) -> None:
                          f'main.tsv'),
             sep='\t', usecols=['annotation', 'charge', 'filename', 'mz',
                                'scan'])
-        metadata.rename(columns={'annotation': 'sequence'}, inplace=True)
+        metadata = metadata.rename(columns={'annotation': 'sequence'})
         dataset_filename = metadata['filename'].str.split('/').str
         metadata['dataset'] = dataset_filename[0]
         metadata['filename'] = dataset_filename[-1]
-        metadata.set_index(['dataset', 'filename', 'scan'], inplace=True)
-        metadata.sort_index(inplace=True)
+        metadata = metadata.sort_values(['dataset', 'filename', 'scan'])
         logger.debug('Save metadata file to %s', filename)
-        metadata.to_csv(filename)
+        metadata.to_csv(filename, index=False)
 
 
 def download_massivekb_peaks(massivekb_task_id: str) -> None:
