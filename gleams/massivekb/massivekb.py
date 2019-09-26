@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 
+import joblib
 import pandas as pd
 
 
@@ -54,6 +55,32 @@ def convert_massivekb_metadata(massivekb_task_id: str) -> None:
         metadata.to_csv(filename, index=False)
 
 
+def download_massive_file(massive_filename: str) -> None:
+    """
+    Download the given file from MassIVE.
+
+    The file is downloaded using a `wget` subprocess.
+    The file will be stored in the `data/peak/{dataset}/{filename}` directory.
+    If the file already exists it will _not_ be downloaded again.
+
+    Parameters
+    ----------
+    massive_filename : str
+        The local MassIVE file link.
+    """
+    dataset = massive_filename.split('/', 1)[0]
+    dataset_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak',
+                               dataset)
+    if not os.path.isdir(dataset_dir):
+        os.makedirs(dataset_dir)
+    peak_filename = massive_filename.rsplit('/', 1)[-1]
+    local_filename = os.path.join(dataset_dir, peak_filename)
+    if not os.path.isfile(local_filename):
+        logger.debug('Download file %s/%s', dataset, peak_filename)
+        url = f'ftp://massive.ucsd.edu/{massive_filename}'
+        subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
+
+
 def download_massivekb_peaks(massivekb_task_id: str) -> None:
     """
     Download all spectral data files listed in the MassIVE-KB metadata file
@@ -75,18 +102,9 @@ def download_massivekb_peaks(massivekb_task_id: str) -> None:
                      f'main.tsv'),
         sep='\t', usecols=['filename'], squeeze=True).unique()
     logger.info('Download peak files from MassIVE')
-    for massive_filename in filenames:
-        dataset = massive_filename.split('/', 1)[0]
-        dataset_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak',
-                                   dataset)
-        if not os.path.isdir(dataset_dir):
-            os.mkdir(dataset_dir)
-        peak_filename = massive_filename.rsplit('/', 1)[-1]
-        local_filename = os.path.join(dataset_dir, peak_filename)
-        if not os.path.isfile(local_filename):
-            logger.debug('Download file %s/%s', dataset, peak_filename)
-            url = f'ftp://massive.ucsd.edu/{massive_filename}'
-            subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
+    joblib.Parallel(n_jobs=-1)(
+        joblib.delayed(download_massive_file)(massive_filename)
+        for massive_filename in filenames)
 
 
 def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
