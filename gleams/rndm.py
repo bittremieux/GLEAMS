@@ -1,3 +1,20 @@
+# Limit annoying Tensforflow logging to only warnings and errors.
+import os
+# 1: No FILTER logging.
+# 2: No WARNING logging.
+# 3: No ERROR logging.
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+# Fix logging hijacking by Tensorflow/abseil.
+# FIXME: https://github.com/abseil/abseil-py/issues/99
+# FIXME: https://github.com/tensorflow/tensorflow/issues/26691
+try:
+    import logging
+    import absl.logging
+    logging.root.removeHandler(absl.logging._absl_handler)
+    absl.logging._warn_preinit_stderr = False
+except Exception as e:
+    pass
+
 # Code taken from: https://keras.io/getting-started/faq/#how-can-i-obtain-reproducible-results-using-keras-during-development
 
 import numpy as np
