@@ -171,20 +171,20 @@ def generate_massivekb_pairs_negative(massivekb_task_id: str,
             os.environ['GLEAMS_HOME'], 'data', 'massivekb',
             f'metadata_{massivekb_task_id}.csv'))
         metadata['row_num'] = range(len(metadata.index))
-        metadata.sort_values('mz', inplace=True)
-        metadata.reset_index(inplace=True)
-
-        pairs = []
-        for i, (row_num1, peptide1, mz1) in enumerate(zip(
-                metadata['row_num'], metadata['sequence'], metadata['mz'])):
-            for row_num2, peptide2, mz2 in zip(
-                    metadata.loc[i + 1:, 'row_num'],
-                    metadata.loc[i + 1:, 'sequence'],
-                    metadata.loc[i + 1:, 'mz']):
-                if mz2 - mz1 <= mz_tolerance:
-                    if peptide1 != peptide2:
-                        pairs.append((row_num1, row_num2))
-                else:
-                    break
+        metadata = (metadata.sort_values(['charge', 'mz'])
+                    .reset_index(drop=True))
         logger.debug('Save negative pair indexes to %s', filename)
-        pd.DataFrame(pairs).to_csv(filename, header=False, index=False)
+        with open(filename, 'w') as f_out:
+            for i, (row_num1, peptide1, mz1) in enumerate(zip(
+                    metadata['row_num'],
+                    metadata['sequence'],
+                    metadata['mz'])):
+                metadata_next = metadata.iloc[i + 1:]
+                for row_num2, peptide2, mz2 in zip(metadata_next['row_num'],
+                                                   metadata_next['sequence'],
+                                                   metadata_next['mz']):
+                    if abs(mz2 - mz1) <= mz_tolerance:
+                        if peptide1 != peptide2:
+                            f_out.write(f'{row_num1},{row_num2}\n')
+                    else:
+                        break
