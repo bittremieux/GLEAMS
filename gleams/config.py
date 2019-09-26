@@ -1,8 +1,8 @@
 from gleams.embed import utils
 
-# MassIVE-KB metadata processing.
+# MassIVE-KB metadata processing and pair generation.
 massivekb_task_id = '82c0124b'  # Version 2018-06-15.
-mz_tolerance = 0.2
+pair_mz_tolerance = 0.2
 
 # MS/MS spectrum preprocessing settings.
 
@@ -39,9 +39,6 @@ fragment_mz_tol = 0.05
 # Theoretical spectrum simulation.
 ms2pip_model = 'HCDch2'
 ms2pip_batch_size = 100000
-
-# Pair generation.
-pair_mz_tolerance = 0.2
 
 
 # Neural network settings.
