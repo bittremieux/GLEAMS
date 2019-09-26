@@ -132,7 +132,8 @@ def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
             os.environ['GLEAMS_HOME'], 'data', 'massivekb',
             f'metadata_{massivekb_task_id}.csv'))
         metadata['row_num'] = range(len(metadata.index))
-        same_row_nums = metadata.groupby(['sequence', 'charge'])['row_num']
+        same_row_nums = metadata.groupby(['sequence', 'charge'],
+                                         sort=False)['row_num']
         logger.debug('Save positive pair indexes to %s', filename)
         with open(filename, 'w') as f_out:
             for p1, p2 in itertools.chain(
