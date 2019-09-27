@@ -32,6 +32,14 @@ with DAG('gleams', default_args=default_args) as dag:
         python_callable=massivekb.convert_massivekb_metadata,
         op_args={'massivekb_task_id': config.massivekb_task_id}
     )
+    t_split_feat = PythonOperator(
+        task_id='split_metadata_train_val_test',
+        python_callable=massivekb.split_metadata_train_val_test,
+        op_args={'massivekb_task_id': config.massivekb_task_id,
+                 'val_ratio': config.val_ratio,
+                 'test_ratio': config.test_ratio,
+                 'rel_tol': config.split_ratio_tolerance}
+    )
     t_download = PythonOperator(
         task_id='download_massivekb_peaks',
         python_callable=massivekb.download_massivekb_peaks,
@@ -56,13 +64,10 @@ with DAG('gleams', default_args=default_args) as dag:
     t_feat_combine = DummyOperator(
         task_id='combine_features'
     )
-    t_split_feat = DummyOperator(
-        task_id='split_features_train_val_test'
-    )
     t_train = DummyOperator(
         task_id='train_model'
     )
 
-    t_metadata >> [t_pairs_pos, t_pairs_neg]
-    t_download >> t_enc_feat >> t_feat_combine >> t_split_feat
-    [t_pairs_pos, t_pairs_neg, t_split_feat] >> t_train
+    t_metadata >> t_split_feat >> [t_pairs_pos, t_pairs_neg]
+    t_download >> t_enc_feat >> t_feat_combine
+    [t_pairs_pos, t_pairs_neg, t_feat_combine] >> t_train

@@ -4,7 +4,10 @@ from gleams.embed import utils
 
 # MassIVE-KB metadata processing and pair generation.
 massivekb_task_id = '82c0124b'  # Version 2018-06-15.
-pair_mz_tolerance = 0.2
+val_ratio = 0.1
+test_ratio = 0.1
+split_ratio_tolerance = 0.01
+pair_mz_tolerance = 10  # ppm
 
 # MS/MS spectrum preprocessing settings.
 

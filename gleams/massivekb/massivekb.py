@@ -57,8 +57,94 @@ def convert_massivekb_metadata(massivekb_task_id: str) -> None:
         metadata['dataset'] = dataset_filename[0]
         metadata['filename'] = dataset_filename[-1]
         metadata = metadata.sort_values(['dataset', 'filename', 'scan'])
+        metadata = metadata[['dataset', 'filename', 'scan', 'sequence',
+                             'charge', 'mz']]
         logger.debug('Save metadata file to %s', filename)
         metadata.to_csv(filename, index=False)
+
+
+def split_metadata_train_val_test(massivekb_task_id: str,
+                                  val_ratio: float = None,
+                                  test_ratio: float = None,
+                                  rel_tol: float = None):
+    """
+    Split the metadata PSM file in training/validation/test files.
+
+    The split is based on dataset, with the ratio of the number of PSMs in each
+    split approximating the given ratios.
+
+    Parameters
+    ----------
+    massivekb_task_id : str
+        The MassIVE task ID corresponding to the downloaded metadata file.
+    val_ratio : float
+        Ratio of the total number of PSMs that should approximately be in the
+        validation set.
+    test_ratio : float
+        Ratio of the total number of PSMs that should approximately be in the
+        test set.
+    rel_tol : float
+        Tolerance on the number of PSMs compared to the given ratios. Default:
+        0.1 * val_ratio.
+    """
+    metadata = pd.read_csv(os.path.join(
+            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
+            f'metadata_{massivekb_task_id}.csv'), index_col='dataset')
+    abs_tol = int((rel_tol if rel_tol is not None else
+                   (0.1 * (val_ratio if val_ratio is not None else 0)))
+                  * len(metadata))
+    num_val = int(val_ratio * len(metadata)) if val_ratio is not None else 0
+    num_test = int(test_ratio * len(metadata)) if test_ratio is not None else 0
+    # Add datasets to the validation/test set until they contain a suitable
+    # number of PSMs.
+    datasets = metadata.groupby('dataset')['scan'].count().sample(
+        frac=1, random_state=17)
+    if num_val > 0:
+        selected_val = _select_datasets(datasets, num_val, abs_tol)
+        metadata.loc[selected_val].to_csv(os.path.join(
+            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
+            f'metadata_{massivekb_task_id}_val.csv'))
+        datasets = datasets.drop(selected_val)
+    if num_test > 0:
+        selected_test = _select_datasets(datasets, num_test, abs_tol)
+        metadata.loc[selected_test].to_csv(os.path.join(
+            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
+            f'metadata_{massivekb_task_id}_test.csv'))
+        datasets = datasets.drop(selected_test)
+    metadata.loc[datasets.index].to_csv(os.path.join(
+        os.environ['GLEAMS_HOME'], 'data', 'massivekb',
+        f'metadata_{massivekb_task_id}_train.csv'))
+
+
+def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
+        -> List[str]:
+    """
+    Select datasets with the specified number of PSMs until the requested
+    number of PSMs is approximately reached.
+
+    Parameters
+    ----------
+    datasets : pd.Series
+        A Series with dataset identifiers as index and number of PSMs as
+        values.
+    num_to_select : int
+        The number of PSMs that should approximately be selected.
+    num_tol : int
+        The amount of deviation that is allowed from `num_to_select`.
+
+    Returns
+    -------
+    List[str]
+        A list of dataset identifiers that are selected.
+    """
+    datasets_selected, num_selected = [], 0
+    for dataset, dataset_num_psms in datasets.items():
+        if (num_selected + dataset_num_psms) - num_to_select < num_tol:
+            datasets_selected.append(dataset)
+            num_selected += dataset_num_psms
+        if abs(num_to_select - num_selected) <= num_tol:
+            break
+    return datasets_selected
 
 
 def download_massive_file(massive_filename: str) -> None:
