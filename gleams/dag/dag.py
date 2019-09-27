@@ -75,11 +75,6 @@ with DAG('gleams', default_args=default_args) as dag:
         task_id='train_model'
     )
 
-    t_metadata >> t_split_feat
-    t_split_feat >> t_pairs_pos
-    t_split_feat >> t_pairs_neg
-    t_download >> t_enc_feat
-    t_enc_feat >> t_feat_combine
-    t_pairs_pos >> t_train
-    t_pairs_neg >> t_train
-    t_feat_combine >> t_train
+    t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]
+    t_download >> t_enc_feat >> t_feat_combine
+    [*t_pairs_pos, *t_pairs_neg, t_feat_combine] >> t_train
