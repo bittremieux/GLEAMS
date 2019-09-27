@@ -16,10 +16,11 @@ from spectrum_utils import utils as suu
 logger = logging.getLogger('gleams')
 
 
-def convert_massivekb_metadata(massivekb_task_id: str) -> None:
+def convert_massivekb_metadata(massivekb_filename: str,
+                               metadata_filename: str) -> None:
     """
-    Convert the MassIVE-KB metadata file with the given MassIVE task ID to a
-    smaller metadata file containing only the relevant information.
+    Convert the MassIVE-KB metadata file to a stripped down metadata file
+    containing only the relevant information.
     The initial metadata file needs to be downloaded manually from MassIVE:
     MassIVE Knowledge Base > Human HCD Spectral Library
         > All Candidate library spectra > Download
@@ -32,26 +33,20 @@ def convert_massivekb_metadata(massivekb_task_id: str) -> None:
     - charge: The PSM's precursor charge.
     - mz: The PSM's precursor m/z.
 
-    This metadata file will be saved to a CSV file
-    `metadata_{massivekb_task_id}.csv`.
-    If this file already exists it will _not_ be recreated.
+    If the stripped down metadata file already exists it will _not_ be
+    recreated.
 
     Parameters
     ----------
-    massivekb_task_id : str
-        The MassIVE task ID corresponding to the downloaded metadata file.
+    massivekb_filename : str
+        The MassIVE-KB metadata file name.
+    metadata_filename : str
+        The metadata file name.
     """
-    filename = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-                            f'metadata_{massivekb_task_id}.csv')
-    if not os.path.isfile(filename):
+    if not os.path.isfile(metadata_filename):
         logger.info('Convert the MassIVE-KB metadata file')
-        metadata = pd.read_csv(
-            os.path.join(os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-                         f'LIBRARY_CREATION_AUGMENT_LIBRARY_TEST-'
-                         f'{massivekb_task_id}-candidate_library_spectra-'
-                         f'main.tsv'),
-            sep='\t', usecols=['annotation', 'charge', 'filename', 'mz',
-                               'scan'])
+        metadata = pd.read_csv(massivekb_filename, sep='\t', usecols=[
+            'annotation', 'charge', 'filename', 'mz', 'scan'])
         metadata = metadata.rename(columns={'annotation': 'sequence'})
         dataset_filename = metadata['filename'].str.split('/').str
         metadata['dataset'] = dataset_filename[0]
@@ -59,61 +54,67 @@ def convert_massivekb_metadata(massivekb_task_id: str) -> None:
         metadata = metadata.sort_values(['dataset', 'filename', 'scan'])
         metadata = metadata[['dataset', 'filename', 'scan', 'sequence',
                              'charge', 'mz']]
-        logger.debug('Save metadata file to %s', filename)
-        metadata.to_csv(filename, index=False)
+        logger.debug('Save metadata file to %s', metadata_filename)
+        metadata.to_csv(metadata_filename, index=False)
 
 
-def split_metadata_train_val_test(massivekb_task_id: str,
-                                  val_ratio: float = None,
-                                  test_ratio: float = None,
-                                  rel_tol: float = None):
+def split_metadata_train_val_test(
+        metadata_filename: str, val_ratio: float = None,
+        test_ratio: float = None, rel_tol: float = None) -> None:
     """
-    Split the metadata PSM file in training/validation/test files.
+    Split the metadata file in training/validation/test files.
 
     The split is based on dataset, with the ratio of the number of PSMs in each
     split approximating the given ratios.
 
     Parameters
     ----------
-    massivekb_task_id : str
-        The MassIVE task ID corresponding to the downloaded metadata file.
+    metadata_filename : str
+        The input metadata filename. It should have a .csv extension.
     val_ratio : float
-        Ratio of the total number of PSMs that should approximately be in the
-        validation set.
+        Proportion of the total number of PSMs that should approximately be in
+        the validation set. If None, no validation split will be generated.
     test_ratio : float
-        Ratio of the total number of PSMs that should approximately be in the
-        test set.
+        Proportion of the total number of PSMs that should approximately be in
+        the test set. If None, no test split will be generated.
     rel_tol : float
-        Tolerance on the number of PSMs compared to the given ratios. Default:
-        0.1 * val_ratio.
+        Proportion tolerance of the number of PSMs in the validation and test
+        splits. Default: 0.1 * val_ratio.
     """
-    metadata = pd.read_csv(os.path.join(
-            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-            f'metadata_{massivekb_task_id}.csv'), index_col='dataset')
+    metadata = pd.read_csv(metadata_filename, index_col='dataset')
     abs_tol = int((rel_tol if rel_tol is not None else
                    (0.1 * (val_ratio if val_ratio is not None else 0)))
                   * len(metadata))
     num_val = int(val_ratio * len(metadata)) if val_ratio is not None else 0
     num_test = int(test_ratio * len(metadata)) if test_ratio is not None else 0
-    # Add datasets to the validation/test set until they contain a suitable
+    # Add datasets to the validation/test splits until they contain a suitable
     # number of PSMs.
+    perc_val = (val_ratio if val_ratio is not None else 0) * 100
+    perc_test = (test_ratio if test_ratio is not None else 0) * 100
+    perc_train = 100 - perc_val - perc_test
+    logger.info('Split the metadata file into train (~%.f%%), validation '
+                '(~%.f%%), and test (~%.f%%) sets', perc_train, perc_val,
+                perc_test)
     datasets = metadata.groupby('dataset')['scan'].count().sample(
         frac=1, random_state=17)
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
-        metadata.loc[selected_val].to_csv(os.path.join(
-            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-            f'metadata_{massivekb_task_id}_val.csv'))
+        logger.debug('Save validation metadata file to %s',
+                     metadata_filename.replace('.csv', '_val.csv'))
+        metadata.loc[selected_val].to_csv(
+            metadata_filename.replace('.csv', '_val.csv'))
         datasets = datasets.drop(selected_val)
     if num_test > 0:
         selected_test = _select_datasets(datasets, num_test, abs_tol)
-        metadata.loc[selected_test].to_csv(os.path.join(
-            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-            f'metadata_{massivekb_task_id}_test.csv'))
+        logger.debug('Save test metadata file to %s',
+                     metadata_filename.replace('.csv', '_test.csv'))
+        metadata.loc[selected_test].to_csv(
+            metadata_filename.replace('.csv', '_test.csv'))
         datasets = datasets.drop(selected_test)
-    metadata.loc[datasets.index].to_csv(os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-        f'metadata_{massivekb_task_id}_train.csv'))
+    logger.debug('Save train metadata file to %s',
+                 metadata_filename.replace('.csv', '_train.csv'))
+    metadata.loc[datasets.index].to_csv(
+        metadata_filename.replace('.csv', '_train.csv'))
 
 
 def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
@@ -173,10 +174,10 @@ def download_massive_file(massive_filename: str) -> None:
         subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
 
 
-def download_massivekb_peaks(massivekb_task_id: str) -> None:
+def download_massivekb_peaks(massivekb_filename: str) -> None:
     """
-    Download all spectral data files listed in the MassIVE-KB metadata file
-    with the given MassIVE task ID.
+    Download all spectral data files listed in the given MassIVE-KB metadata
+    file.
 
     Peak files will be stored in the `data/peak/{dataset}/{filename}`
     directories.
@@ -184,44 +185,37 @@ def download_massivekb_peaks(massivekb_task_id: str) -> None:
 
     Parameters
     ----------
-    massivekb_task_id : str
-        The MassIVE task ID corresponding to the downloaded metadata file.
+    massivekb_filename : str
+        The metadata file name.
     """
-    filenames = pd.read_csv(
-        os.path.join(os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-                     f'LIBRARY_CREATION_AUGMENT_LIBRARY_TEST-'
-                     f'{massivekb_task_id}-candidate_library_spectra-'
-                     f'main.tsv'),
-        sep='\t', usecols=['filename'], squeeze=True).unique()
+    filenames = pd.read_csv(massivekb_filename, sep='\t', usecols=['filename'],
+                            squeeze=True).unique()
     logger.info('Download peak files from MassIVE')
-    joblib.Parallel(n_jobs=-1)(
-        joblib.delayed(download_massive_file)(massive_filename)
-        for massive_filename in filenames)
+    joblib.Parallel(n_jobs=-1)(joblib.delayed(download_massive_file)(filename)
+                               for filename in filenames)
 
 
-def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
+def generate_pairs_positive(metadata_filename: str) -> None:
     """
-    Generate index pairs for positive training pairs from the MassIVE-KB
-    metadata with the given MassIVE task ID.
+    Generate index pairs for positive training pairs for the given metadata
+    file.
 
     The positive training pairs consist of all pairs with the same peptide
-    sequence in the MassIVE-KB metadata. Identity pairs are included.
-    Pairs of row numbers in the MassIVE-KB metadata file for each positive pair
-    are stored in CSV file `pairs_positive_{massivekb_task_id}.csv`.
+    sequence in the metadata. Identity pairs are included.
+    Pairs of row numbers in the metadata file for each positive pair are stored
+    in CSV file `{metadata_filename}_pairs_pos.csv`.
     If this file already exists it will _not_ be recreated.
 
     Parameters
     ----------
-    massivekb_task_id : str
-        The MassIVE task ID corresponding to the metadata file.
+    metadata_filename : str
+        The metadata file name. Should have a .csv extension.
     """
-    filename = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-                            f'pairs_positive_{massivekb_task_id}.csv')
+    filename = metadata_filename.replace('.csv', '_pairs_pos.csv')
     if not os.path.isfile(filename):
-        logger.info('Generate MassIVE-KB positive pair indexes')
-        metadata = pd.read_csv(os.path.join(
-            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-            f'metadata_{massivekb_task_id}.csv'))
+        logger.info('Generate positive pair indexes for metadata file %s',
+                    metadata_filename)
+        metadata = pd.read_csv(metadata_filename)
         metadata['row_num'] = range(len(metadata.index))
         same_row_nums = metadata.groupby(['sequence', 'charge'],
                                          sort=False)['row_num']
@@ -233,34 +227,32 @@ def generate_massivekb_pairs_positive(massivekb_task_id: str) -> None:
                 f_out.write(f'{p1},{p2}\n')
 
 
-def generate_massivekb_pairs_negative(massivekb_task_id: str,
-                                      mz_tolerance: float) -> None:
+def generate_pairs_negative(metadata_filename: str,
+                            mz_tolerance: float) -> None:
     """
-    Generate index pairs for negative training pairs from the MassIVE-KB
-    metadata with the given MassIVE task ID.
+    Generate index pairs for negative training pairs for the given metadata
+    file.
 
     The negative training pairs consist of all pairs with a different peptide
     sequence and a precursor m/z difference smaller than the given m/z
-    tolerance in the MassIVE-KB metadata.
-    Pairs of row numbers in the MassIVE-KB metadata file for each negative pair
-    are stored in CSV file `pairs_negative_{massivekb_task_id}.csv`.
+    tolerance in the metadata.
+    Pairs of row numbers in the metadata file for each negative pair are stored
+    in CSV file `{metadata_filename}_pairs_neg.csv`.
     If this file already exists it will _not_ be recreated.
 
     Parameters
     ----------
-    massivekb_task_id : str
-        The MassIVE task ID corresponding to the metadata file.
+    metadata_filename : str
+        The metadata file name. Should have a .csv extension.
     mz_tolerance : float
         Maximum precursor m/z tolerance for two PSMs to be considered a
         negative pair.
     """
-    filename = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-                            f'pairs_negative_{massivekb_task_id}.csv')
+    filename = metadata_filename.replace('.csv', '_pairs_neg.csv')
     if not os.path.isfile(filename):
-        logger.info('Generate MassIVE-KB negative pair indexes')
-        metadata = pd.read_csv(os.path.join(
-            os.environ['GLEAMS_HOME'], 'data', 'massivekb',
-            f'metadata_{massivekb_task_id}.csv'))
+        logger.info('Generate negative pair indexes for metadata file %s',
+                    metadata_filename)
+        metadata = pd.read_csv(metadata_filename)
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))

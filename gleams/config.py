@@ -4,6 +4,13 @@ from gleams.embed import utils
 
 # MassIVE-KB metadata processing and pair generation.
 massivekb_task_id = '82c0124b'  # Version 2018-06-15.
+massivekb_filename = os.path.join(
+    os.environ['GLEAMS_HOME'], 'data', 'metadata',
+    f'LIBRARY_CREATION_AUGMENT_LIBRARY_TEST-{massivekb_task_id}-'
+    f'candidate_library_spectra-main.tsv')
+metadata_filename = os.path.join(
+    os.environ['GLEAMS_HOME'], 'data', 'metadata',
+    f'metadata_{massivekb_task_id}.csv')
 val_ratio = 0.1
 test_ratio = 0.1
 split_ratio_tolerance = 0.01

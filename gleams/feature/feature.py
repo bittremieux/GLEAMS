@@ -27,9 +27,9 @@ def peaks_to_features(dataset: str, filename: str, psms: pd.DataFrame,
     np.savez_compressed(feat_filename, np.vstack(features))
 
 
-def convert_massivekb_peaks_to_features(massivekb_task_id: str):
+def convert_peaks_to_features(massivekb_task_id: str):
     metadata = pd.read_csv(os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'massivekb',
+        os.environ['GLEAMS_HOME'], 'data', 'metadata',
         f'metadata_{massivekb_task_id}.csv'),
         index_col=['dataset', 'filename', 'scan'])
 
