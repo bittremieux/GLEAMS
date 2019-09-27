@@ -45,7 +45,7 @@ bin_size = utils.averagine_peak_separation_da
 
 # Reference spectra encoding.
 ref_spectra_filename = os.path.join(
-    '..', 'data', 'gleams_reference_spectra.mgf')
+    os.environ['GLEAMS_HOME'], 'src', 'data', 'gleams_reference_spectra.mgf')
 num_ref_spectra = 500
 fragment_mz_tol = 0.05
 

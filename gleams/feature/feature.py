@@ -12,26 +12,57 @@ from gleams.ms_io import ms_io
 logger = logging.getLogger('gleams')
 
 
-def peaks_to_features(dataset: str, filename: str, psms: pd.DataFrame,
-                      enc: encoder.SpectrumEncoder) -> None:
+def _peaks_to_features(dataset: str, filename: str,
+                       identifiers_to_include: set,
+                       enc: encoder.SpectrumEncoder) -> None:
+    """
+    Convert the spectra with the given identifiers in the given file to a
+    feature array.
+
+    If the feature file already exist it will _not_ be recreated.
+
+    Parameters
+    ----------
+    dataset : str
+        The peak file's dataset.
+    filename : str
+        The peak file name.
+    identifiers_to_include : set
+        The identifiers of the spectra in the given file that will be converted
+        to features.
+    enc : encoder.SpectrumEncoder
+        The SpectrumEncoder used to convert spectra to features.
+    """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
     feat_filename = os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'feature',
-        dataset, f'{os.path.splitext(filename)[0]}.npz')
-    logger.info('Generate features for peaks file %s', filename)
-    features = [enc.encode(spec) for spec in ms_io.get_spectra(peak_filename)
-                if spec.identifier in psms.index and
-                spectrum.preprocess(spec, config.fragment_mz_min,
-                                    config.fragment_mz_max).is_valid]
-    np.savez_compressed(feat_filename, np.vstack(features))
+        os.environ['GLEAMS_HOME'], 'data', 'feature', dataset,
+        f'{os.path.splitext(filename)[0]}.npz')
+    if not os.path.isfile(feat_filename):
+        features = [enc.encode(spec)
+                    for spec in ms_io.get_spectra(peak_filename)
+                    if spec.identifier in identifiers_to_include and
+                    spectrum.preprocess(spec, config.fragment_mz_min,
+                                        config.fragment_mz_max).is_valid]
+        logger.debug('Save features to file %s', feat_filename)
+        np.savez_compressed(feat_filename, np.vstack(features))
 
 
-def convert_peaks_to_features(massivekb_task_id: str):
-    metadata = pd.read_csv(os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'metadata',
-        f'metadata_{massivekb_task_id}.csv'),
-        index_col=['dataset', 'filename', 'scan'])
+def convert_peaks_to_features(metadata_filename: str):
+    """
+    Convert all peak files listed in the given metadata file to features.
+
+    Features will be stored as data/feature/{dataset}/{filename}.npz files
+    corresponding to the original peak files.
+    Existing feature files will _not_ be converted again.
+
+    Parameters
+    ----------
+    metadata_filename : str
+        The metadata file name. Should have a .csv extension.
+    """
+    metadata = pd.read_csv(metadata_filename, index_col=['dataset',
+                                                         'filename'])
 
     enc = encoder.MultipleEncoder([
         encoder.PrecursorEncoder(
@@ -47,6 +78,10 @@ def convert_peaks_to_features(massivekb_task_id: str):
             config.num_ref_spectra)
     ])
 
-    for dataset, filename in zip(metadata['dataset'], metadata['filename']):
-        peaks_to_features(dataset, filename, metadata.loc[[dataset, filename]],
-                          enc)
+    logger.info('Convert peak files for metadata file %s to features',
+                metadata_filename)
+    for (dataset, filename), metadata_filename in metadata.groupby(
+            level=['dataset', 'filename']):
+        logger.debug('Convert peak file %s/%s to features', dataset, filename)
+        _peaks_to_features(dataset, filename, set(metadata_filename['scan']),
+                           enc)
