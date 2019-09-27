@@ -3,9 +3,14 @@ import itertools
 import logging
 import os
 import subprocess
+import warnings
+from typing import Iterator, List, Tuple
 
 import joblib
+import numba as nb
+import numpy as np
 import pandas as pd
+from spectrum_utils import utils as suu
 
 
 logger = logging.getLogger('gleams')
@@ -173,18 +178,51 @@ def generate_massivekb_pairs_negative(massivekb_task_id: str,
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
+        row_nums = metadata['row_num'].values
+        # List because Numba can't handle object (string) arrays.
+        sequences = metadata['sequence'].tolist()
+        mzs = metadata['mz'].values
         logger.debug('Save negative pair indexes to %s', filename)
-        with open(filename, 'w') as f_out:
-            for i, (row_num1, peptide1, mz1) in enumerate(zip(
-                    metadata['row_num'],
-                    metadata['sequence'],
-                    metadata['mz'])):
-                metadata_next = metadata.iloc[i + 1:]
-                for row_num2, peptide2, mz2 in zip(metadata_next['row_num'],
-                                                   metadata_next['sequence'],
-                                                   metadata_next['mz']):
-                    if abs(mz2 - mz1) <= mz_tolerance:
-                        if peptide1 != peptide2:
-                            f_out.write(f'{row_num1},{row_num2}\n')
-                    else:
-                        break
+        with warnings.catch_warnings():
+            # FIXME: Deprecated reflected list in Numba should be resolved from
+            #        version 0.46.0 onwards.
+            #  https://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
+            warnings.simplefilter('ignore', nb.NumbaPendingDeprecationWarning)
+            with open(filename, 'w') as f_out:
+                for row_num1, row_num2 in _generate_pairs_negative(
+                        row_nums, sequences, mzs, mz_tolerance):
+                    f_out.write(f'{row_num1},{row_num2}\n')
+
+
+@nb.njit
+def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
+                             mzs: np.ndarray, mz_tolerance: float)\
+        -> Iterator[Tuple[int, int]]:
+    """
+    Numba utility function to efficiently generate row numbers for negative
+    pairs.
+
+    Parameters
+    ----------
+    row_nums : np.ndarray
+        A NumPy array of row numbers for each PSM.
+    sequences : List[str]
+        A list of peptide sequences for each PSM.
+    mzs : np.ndarray
+        A NumPy array of precursor m/z values for each PSM.
+    mz_tolerance : float
+        Maximum precursor m/z tolerance for two PSMs to be considered a
+        negative pair.
+
+    Returns
+    -------
+    Iterator[Tuple[int, int]]
+        A generator of tuple with matching row numbers of the negative pairs.
+    """
+    for i in range(len(row_nums)):
+        j = i + 1
+        while (j < len(mzs) and
+               abs(suu.mass_diff(mzs[i], mzs[j], False)) <= mz_tolerance):
+            if sequences[i] != sequences[j]:
+                yield row_nums[i], row_nums[j]
+            j += 1
