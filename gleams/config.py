@@ -1,3 +1,5 @@
+import os
+
 from gleams.embed import utils
 
 # MassIVE-KB metadata processing and pair generation.
@@ -32,7 +34,8 @@ fragment_mz_max = 2500.
 bin_size = utils.averagine_peak_separation_da
 
 # Reference spectra encoding.
-ref_spectra_filename = utils.get_data_path('gleams_reference_spectra.mgf')
+ref_spectra_filename = os.path.join(
+    '..', 'data', 'gleams_reference_spectra.mgf')
 num_ref_spectra = 500
 fragment_mz_tol = 0.05
 

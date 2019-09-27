@@ -187,21 +187,3 @@ def generate_random_string(length: int) -> str:
     A random string consisting of alphabetic characters.
     """
     return ''.join(random.choices(string.ascii_lowercase, k=length))
-
-
-def get_data_path(filename: str) -> str:
-    """
-    Get the absolute path of a file in the expected data directory.
-
-    Parameters
-    ----------
-    filename : str
-        The name of the file in the data directory.
-
-    Returns
-    -------
-    str
-        The absolute path of the given file in the data directory.
-    """
-    return os.path.abspath(os.path.join(os.path.split(__file__)[0],
-                                        '../..', 'data', filename))

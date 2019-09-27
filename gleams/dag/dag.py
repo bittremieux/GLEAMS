@@ -10,6 +10,7 @@ from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
 
 from gleams import config
+from gleams.feature import feature
 from gleams.massivekb import massivekb
 
 
@@ -47,13 +48,21 @@ with DAG('gleams', default_args=default_args) as dag:
         op_args={'massivekb_task_id': config.massivekb_task_id,
                  'mz_tolerance': config.pair_mz_tolerance}
     )
-    t_enc_feat = DummyOperator(
-        task_id='encode_peaks_to_features'
+    t_enc_feat = PythonOperator(
+        task_id='convert_massivekb_peaks_to_features',
+        python_callable=feature.convert_massivekb_peaks_to_features,
+        op_args={'massivekb_task_id': config.massivekb_task_id}
+    )
+    t_feat_combine = DummyOperator(
+        task_id='combine_features'
+    )
+    t_split_feat = DummyOperator(
+        task_id='split_features_train_val_test'
     )
     t_train = DummyOperator(
         task_id='train_model'
     )
 
     t_metadata >> [t_pairs_pos, t_pairs_neg]
-    t_download >> t_enc_feat
-    [t_pairs_pos, t_pairs_neg, t_enc_feat] >> t_train
+    t_download >> t_enc_feat >> t_feat_combine >> t_split_feat
+    [t_pairs_pos, t_pairs_neg, t_split_feat] >> t_train
