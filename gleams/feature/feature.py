@@ -85,3 +85,36 @@ def convert_peaks_to_features(metadata_filename: str):
         logger.debug('Convert peak file %s/%s to features', dataset, filename)
         _peaks_to_features(dataset, filename, set(metadata_filename['scan']),
                            enc)
+
+
+def merge_features(metadata_filename: str):
+    """
+    Merge all feature files for the given metadata file into a single large
+    feature file.
+
+    If this file already exists it will _not_ be recreated.
+
+    Parameters
+    ----------
+    metadata_filename : str
+        The metadata file name.
+    """
+    feat_filename = os.path.join(
+        os.environ['GLEAMS_HOME'], 'data', 'feature',
+        (os.path.splitext(os.path.basename(metadata_filename))[0]
+         .replace('metadata_', 'feature_') + '.npz'))
+    if not os.path.isfile(feat_filename):
+        logger.info('Merge feature files for metadata file %s',
+                    metadata_filename)
+        metadata = pd.read_csv(metadata_filename, index_col=['dataset',
+                                                             'filename'])
+        datasets_filenames = metadata.index.unique()
+        features = [
+            np.load(os.path.join(
+                os.environ['GLEAMS_HOME'], 'data', 'feature', dataset,
+                f'{os.path.splitext(filename)[0]}.npz'))['arr_0']
+            for dataset, filename in zip(
+                datasets_filenames.get_level_values('dataset'),
+                datasets_filenames.get_level_values('filename'))]
+        logger.debug('Save merged features to file %s', feat_filename)
+        np.savez_compressed(feat_filename, np.vstack(features))
