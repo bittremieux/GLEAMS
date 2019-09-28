@@ -39,6 +39,7 @@ def _peaks_to_features(dataset: str, filename: str,
         os.environ['GLEAMS_HOME'], 'data', 'feature', dataset,
         f'{os.path.splitext(filename)[0]}.npz')
     if not os.path.isfile(feat_filename):
+        os.makedirs(os.path.dirname(feat_filename))
         features = [enc.encode(spec)
                     for spec in ms_io.get_spectra(peak_filename)
                     if spec.identifier in identifiers_to_include and
