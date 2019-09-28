@@ -1,6 +1,5 @@
 import os
 
-from gleams.embed import utils
 
 # MassIVE-KB metadata processing and pair generation.
 massivekb_task_id = '82c0124b'  # Version 2018-06-15.
@@ -39,9 +38,10 @@ num_bits_precursor_mass = 27
 precursor_charge_max = 7
 
 # Fragment encoding.
-fragment_mz_min = utils.averagine_peak_separation_da * 50.5
+averagine_peak_separation_da = 1.0005079
+fragment_mz_min = averagine_peak_separation_da * 50.5
 fragment_mz_max = 2500.
-bin_size = utils.averagine_peak_separation_da
+bin_size = averagine_peak_separation_da
 
 # Reference spectra encoding.
 ref_spectra_filename = os.path.join(

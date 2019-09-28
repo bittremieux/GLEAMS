@@ -4,10 +4,10 @@ import logging
 import random
 from typing import List
 
+import numba as nb
 import numpy as np
 from spectrum_utils.spectrum import MsmsSpectrum
 
-from gleams.embed import utils
 from gleams.feature import spectrum
 from gleams.ms_io import ms_io
 
@@ -107,11 +107,11 @@ class PrecursorEncoder(SpectrumEncoder):
             precursor m/z, a gray encoding of the precursor neutral mass, and
             a one-hot encoding of the precursor charge.
         """
-        gray_code_mz = utils.binary_encode(
+        gray_code_mz = binary_encode(
             spec.precursor_mz, self.mz_min, self.mz_max, self.num_bits_mz)
-        precursor_mass = utils.neutral_mass_from_mz_charge(
+        precursor_mass = neutral_mass_from_mz_charge(
             spec.precursor_mz, spec.precursor_charge)
-        gray_code_mass = utils.binary_encode(
+        gray_code_mass = binary_encode(
             precursor_mass, self.mass_min, self.mass_max, self.num_bits_mass)
         one_hot_charge = np.zeros((self.charge_max,), np.float32)
         one_hot_charge[min(spec.precursor_charge, self.charge_max) - 1] = 1.
@@ -268,3 +268,109 @@ class MultipleEncoder(SpectrumEncoder):
             Concatenated spectrum features produced by all child encoders.
         """
         return np.hstack([enc.encode(spec) for enc in self.encoders])
+
+
+@nb.njit
+def neutral_mass_from_mz_charge(mz: float, charge: int) -> float:
+    """
+    Calculate the neutral mass of an ion given its m/z and charge.
+
+    Parameters
+    ----------
+    mz : float
+        The ion's m/z.
+    charge : int
+        The ion's charge.
+
+    Returns
+    -------
+    float
+        The ion's neutral mass.
+    """
+    hydrogen_mass = 1.00794
+    return (mz - hydrogen_mass) * charge
+
+
+def _gray_code(value: int, num_bits: int) -> np.ndarray:
+    """
+    Return the Gray code for a given integer, given the number of bits to use
+    for the encoding.
+
+    Parameters
+    ----------
+    value : int
+        The integer value to be converted to Gray code.
+    num_bits : int
+        The number of bits of the encoding. No checking is done to ensure a
+        sufficient number of bits to store the encoding is specified.
+
+    Returns
+    -------
+    np.ndarray
+        An array of individual bit values as floats.
+    """
+    # Gray encoding: https://stackoverflow.com/a/38745459
+    return np.asarray(list(f'{value ^ (value >> 1):0{num_bits}b}'), np.float32)
+
+
+@nb.njit
+def _get_bin_index(value: float, min_value: float, max_value: float,
+                   num_bits: int) -> int:
+    """
+    Get the index of the given value between a minimum and maximum value given
+    a specified number of bits.
+
+    Parameters
+    ----------
+    value : float
+        The value to be converted to a bin index.
+    min_value : float
+        The minimum possible value.
+    max_value : float
+        The maximum possible value.
+    num_bits : int
+        The number of bits of the encoding.
+
+    Returns
+    -------
+    int
+        The integer bin index of the value between the given minimum and
+        maximum value using the specified number of bits.
+    """
+    # Divide the value range into equal intervals
+    # and find the value's integer index.
+    num_bins = 2 ** num_bits
+    bin_size = (max_value - min_value) / num_bins
+    bin_index = int((value - min_value) / bin_size)
+    # Clip to min/max.
+    bin_index = max(0, min(num_bins - 1, bin_index))
+    return bin_index
+
+
+def binary_encode(value: float, min_value: float, max_value: float,
+                  num_bits: int) -> np.ndarray:
+    """
+    Return the Gray code for a given value, given the number of bits to use
+    for the encoding. The given number of bits equally spans the range between
+    the given minimum and maximum value.
+    If the given value is not within the interval given by the minimum and
+    maximum value it will be clipped to either extremum.
+
+    Parameters
+    ----------
+    value : float
+        The value to be converted to Gray code.
+    min_value : float
+        The minimum possible value.
+    max_value : float
+        The maximum possible value.
+    num_bits : int
+        The number of bits of the encoding.
+
+    Returns
+    -------
+    np.ndarray
+        An array of individual bit values as floats.
+    """
+    bin_index = _get_bin_index(value, min_value, max_value, num_bits)
+    return _gray_code(bin_index, num_bits)
