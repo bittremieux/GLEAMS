@@ -30,27 +30,27 @@ with DAG('gleams', default_args=default_args,
     t_metadata = PythonOperator(
         task_id='convert_massivekb_metadata',
         python_callable=metadata.convert_massivekb_metadata,
-        op_args={'massivekb_filename': config.massivekb_filename,
-                 'metadata_filename': config.metadata_filename}
+        op_kwargs={'massivekb_filename': config.massivekb_filename,
+                   'metadata_filename': config.metadata_filename}
     )
     t_split_feat = PythonOperator(
         task_id='split_metadata_train_val_test',
         python_callable=metadata.split_metadata_train_val_test,
-        op_args={'metadata_filename': config.metadata_filename,
-                 'val_ratio': config.val_ratio,
-                 'test_ratio': config.test_ratio,
-                 'rel_tol': config.split_ratio_tolerance}
+        op_kwargs={'metadata_filename': config.metadata_filename,
+                   'val_ratio': config.val_ratio,
+                   'test_ratio': config.test_ratio,
+                   'rel_tol': config.split_ratio_tolerance}
     )
     t_download = PythonOperator(
         task_id='download_massivekb_peaks',
         python_callable=metadata.download_massivekb_peaks,
-        op_args={'massivekb_filename': config.massivekb_filename}
+        op_kwargs={'massivekb_filename': config.massivekb_filename}
     )
     t_pairs_pos = [
         PythonOperator(
             task_id=f'generate_pairs_positive_{suffix}',
             python_callable=metadata.generate_pairs_positive,
-            op_args={'metadata_filename': config.metadata_filename.replace(
+            op_kwargs={'metadata_filename': config.metadata_filename.replace(
                 '.csv', f'_{suffix}.csv')})
         for suffix in ['train', 'val', 'test']
     ]
@@ -58,21 +58,21 @@ with DAG('gleams', default_args=default_args,
         PythonOperator(
             task_id=f'generate_pairs_negative_{suffix}',
             python_callable=metadata.generate_pairs_negative,
-            op_args={'metadata_filename': config.metadata_filename.replace(
-                    '.csv', f'_{suffix}.csv'),
-                'mz_tolerance': config.pair_mz_tolerance})
+            op_kwargs={'metadata_filename': config.metadata_filename.replace(
+                           '.csv', f'_{suffix}.csv'),
+                       'mz_tolerance': config.pair_mz_tolerance})
         for suffix in ['train', 'val', 'test']
     ]
     t_enc_feat = PythonOperator(
         task_id='convert_peaks_to_features',
         python_callable=feature.convert_peaks_to_features,
-        op_args={'metadata_filename': config.metadata_filename}
+        op_kwargs={'metadata_filename': config.metadata_filename}
     )
     t_feat_combine = [
         PythonOperator(
             task_id=f'merge_features_{suffix}',
             python_callable=feature.merge_features,
-            op_args={'metadata_filename': config.metadata_filename.replace(
+            op_kwargs={'metadata_filename': config.metadata_filename.replace(
                 '.csv', f'_{suffix}.csv')})
         for suffix in ['train', 'val', 'test']
     ]
