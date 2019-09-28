@@ -18,7 +18,6 @@ default_args = {
     'owner': 'gleams',
     'depends_on_past': False,
     'start_date': datetime.datetime(2019, 1, 1),
-    'schedule_interval': datetime.timedelta(weeks=1),
     'email': ['wbittremieux@ucsd.edu'],
     'email_on_failure': False,
     'email_on_retry': False,
@@ -26,7 +25,8 @@ default_args = {
     'retry_delay': datetime.timedelta(minutes=5)
 }
 
-with DAG('gleams', default_args=default_args) as dag:
+with DAG('gleams', default_args=default_args,
+         schedule_interval=datetime.timedelta(weeks=1)) as dag:
     t_metadata = PythonOperator(
         task_id='convert_massivekb_metadata',
         python_callable=metadata.convert_massivekb_metadata,
