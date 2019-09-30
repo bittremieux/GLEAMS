@@ -1,6 +1,7 @@
 import logging
 import os
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -40,6 +41,7 @@ def _peaks_to_features(dataset: str, filename: str,
     feat_filename = os.path.join(
         feat_dir, f'{os.path.splitext(filename)[0]}.npz')
     if not os.path.isfile(feat_filename):
+        logger.debug('Convert peak file %s/%s to features', dataset, filename)
         if not os.path.isdir(feat_dir):
             try:
                 os.makedirs(feat_dir)
@@ -86,11 +88,11 @@ def convert_peaks_to_features(metadata_filename: str):
 
     logger.info('Convert peak files for metadata file %s to features',
                 metadata_filename)
-    for (dataset, filename), metadata_filename in metadata.groupby(
-            level=['dataset', 'filename']):
-        logger.debug('Convert peak file %s/%s to features', dataset, filename)
-        _peaks_to_features(
-            dataset, filename, set(metadata_filename['scan'].astype(str)), enc)
+    joblib.Parallel(n_jobs=-1)(
+        joblib.delayed(_peaks_to_features)
+        (dataset, filename, set(metadata_filename['scan'].astype(str)), enc)
+        for (dataset, filename), metadata_filename in metadata.groupby(
+            level=['dataset', 'filename']))
 
 
 def merge_features(metadata_filename: str):
