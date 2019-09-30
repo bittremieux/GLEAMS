@@ -36,6 +36,10 @@ def _peaks_to_features(dataset: str, filename: str,
     """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
+    if not os.path.isfile(peak_filename):
+        logger.warning('Missing peak file %s, no features generated',
+                       peak_filename)
+        return
     feat_dir = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'feature', dataset)
     feat_filename = os.path.join(
