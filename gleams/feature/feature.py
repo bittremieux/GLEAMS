@@ -89,8 +89,8 @@ def convert_peaks_to_features(metadata_filename: str):
     for (dataset, filename), metadata_filename in metadata.groupby(
             level=['dataset', 'filename']):
         logger.debug('Convert peak file %s/%s to features', dataset, filename)
-        _peaks_to_features(dataset, filename, set(metadata_filename['scan']),
-                           enc)
+        _peaks_to_features(
+            dataset, filename, set(metadata_filename['scan'].astype(str)), enc)
 
 
 def merge_features(metadata_filename: str):
