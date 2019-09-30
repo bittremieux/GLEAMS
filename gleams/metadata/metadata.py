@@ -165,7 +165,10 @@ def download_massive_file(massive_filename: str) -> None:
     dataset_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak',
                                dataset)
     if not os.path.isdir(dataset_dir):
-        os.makedirs(dataset_dir)
+        try:
+            os.makedirs(dataset_dir)
+        except OSError:
+            pass
     peak_filename = massive_filename.rsplit('/', 1)[-1]
     local_filename = os.path.join(dataset_dir, peak_filename)
     if not os.path.isfile(local_filename):

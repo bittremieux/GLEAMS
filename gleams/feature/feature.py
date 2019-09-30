@@ -35,11 +35,16 @@ def _peaks_to_features(dataset: str, filename: str,
     """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
+    feat_dir = os.path.join(
+        os.environ['GLEAMS_HOME'], 'data', 'feature', dataset)
     feat_filename = os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'feature', dataset,
-        f'{os.path.splitext(filename)[0]}.npz')
+        feat_dir, f'{os.path.splitext(filename)[0]}.npz')
     if not os.path.isfile(feat_filename):
-        os.makedirs(os.path.dirname(feat_filename))
+        if not os.path.isdir(feat_dir):
+            try:
+                os.makedirs(feat_dir)
+            except OSError:
+                pass
         features = [enc.encode(spec)
                     for spec in ms_io.get_spectra(peak_filename)
                     if spec.identifier in identifiers_to_include and
