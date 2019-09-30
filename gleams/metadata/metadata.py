@@ -174,7 +174,10 @@ def download_massive_file(massive_filename: str) -> None:
     if not os.path.isfile(local_filename):
         logger.debug('Download file %s/%s', dataset, peak_filename)
         url = f'ftp://massive.ucsd.edu/{massive_filename}'
-        subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
+        proc = subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
+        if proc.returncode != 0:
+            logger.warning('Could not download file %s/%s: wget error %d',
+                           dataset, peak_filename, proc.returncode)
 
 
 def download_massivekb_peaks(massivekb_filename: str) -> None:
