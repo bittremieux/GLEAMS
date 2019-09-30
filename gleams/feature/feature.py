@@ -1,9 +1,11 @@
 import logging
 import os
+from typing import Iterator, Tuple
 
-import joblib
+import h5py
 import numpy as np
 import pandas as pd
+from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams import config
 from gleams.feature import encoder, spectrum
@@ -13,9 +15,9 @@ from gleams.ms_io import ms_io
 logger = logging.getLogger('gleams')
 
 
-def _peaks_to_features(dataset: str, filename: str,
-                       identifiers_to_include: set,
-                       enc: encoder.SpectrumEncoder) -> None:
+def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
+                       enc: encoder.SpectrumEncoder)\
+        -> Iterator[Tuple[MsmsSpectrum, np.ndarray]]:
     """
     Convert the spectra with the given identifiers in the given file to a
     feature array.
@@ -28,11 +30,16 @@ def _peaks_to_features(dataset: str, filename: str,
         The peak file's dataset.
     filename : str
         The peak file name.
-    identifiers_to_include : set
-        The identifiers of the spectra in the given file that will be converted
-        to features.
+    metadata : pd.DataFrame
+        DataFrame containing metadata for the PSMs in the peak file to be
+        processed.
     enc : encoder.SpectrumEncoder
         The SpectrumEncoder used to convert spectra to features.
+
+    Returns
+    -------
+    Iterator[Tuple[MsmsSpectrum, np.ndarray]]
+        Tuples of spectra and their encoded feature array.
     """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
@@ -40,24 +47,13 @@ def _peaks_to_features(dataset: str, filename: str,
         logger.warning('Missing peak file %s, no features generated',
                        peak_filename)
         return
-    feat_dir = os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'feature', dataset)
-    feat_filename = os.path.join(
-        feat_dir, f'{os.path.splitext(filename)[0]}.npz')
-    if not os.path.isfile(feat_filename):
-        logger.debug('Convert peak file %s/%s to features', dataset, filename)
-        if not os.path.isdir(feat_dir):
-            try:
-                os.makedirs(feat_dir)
-            except OSError:
-                pass
-        features = [enc.encode(spec)
-                    for spec in ms_io.get_spectra(peak_filename)
-                    if spec.identifier in identifiers_to_include and
-                    spectrum.preprocess(spec, config.fragment_mz_min,
-                                        config.fragment_mz_max).is_valid]
-        logger.debug('Save features to file %s', feat_filename)
-        np.savez_compressed(feat_filename, np.vstack(features))
+    logger.debug('Convert peak file %s/%s to features', dataset, filename)
+    for spec in ms_io.get_spectra(peak_filename):
+        if (str(spec.identifier) in metadata.index and
+                spectrum.preprocess(spec, config.fragment_mz_min,
+                                    config.fragment_mz_max).is_valid):
+            spec.peptide = metadata.at[spec.identifier, 'sequence']
+            yield spec, enc.encode(spec)
 
 
 def convert_peaks_to_features(metadata_filename: str):
@@ -73,8 +69,9 @@ def convert_peaks_to_features(metadata_filename: str):
     metadata_filename : str
         The metadata file name. Should have a .csv extension.
     """
-    metadata = pd.read_csv(metadata_filename, index_col=['dataset',
-                                                         'filename'])
+    metadata = pd.read_csv(metadata_filename,
+                           index_col=['dataset', 'filename'],
+                           dtype={'scan': str})
 
     enc = encoder.MultipleEncoder([
         encoder.PrecursorEncoder(
@@ -90,43 +87,27 @@ def convert_peaks_to_features(metadata_filename: str):
             config.num_ref_spectra)
     ])
 
-    logger.info('Convert peak files for metadata file %s to features',
-                metadata_filename)
-    joblib.Parallel(n_jobs=-1)(
-        joblib.delayed(_peaks_to_features)
-        (dataset, filename, set(metadata_filename['scan'].astype(str)), enc)
-        for (dataset, filename), metadata_filename in metadata.groupby(
-            level=['dataset', 'filename']))
-
-
-def merge_features(metadata_filename: str):
-    """
-    Merge all feature files for the given metadata file into a single large
-    feature file.
-
-    If this file already exists it will _not_ be recreated.
-
-    Parameters
-    ----------
-    metadata_filename : str
-        The metadata file name.
-    """
+    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
     feat_filename = os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'feature',
-        (os.path.splitext(os.path.basename(metadata_filename))[0]
-         .replace('metadata_', 'feature_') + '.npz'))
-    if not os.path.isfile(feat_filename):
-        logger.info('Merge feature files for metadata file %s',
-                    metadata_filename)
-        metadata = pd.read_csv(metadata_filename, index_col=['dataset',
-                                                             'filename'])
-        datasets_filenames = metadata.index.unique()
-        features = [
-            np.load(os.path.join(
-                os.environ['GLEAMS_HOME'], 'data', 'feature', dataset,
-                f'{os.path.splitext(filename)[0]}.npz'))['arr_0']
-            for dataset, filename in zip(
-                datasets_filenames.get_level_values('dataset'),
-                datasets_filenames.get_level_values('filename'))]
-        logger.debug('Save merged features to file %s', feat_filename)
-        np.savez_compressed(feat_filename, np.vstack(features))
+        feat_dir, (os.path.splitext(os.path.basename(metadata_filename))[0]
+                   .replace('metadata_', 'feature_') + '.hdf5'))
+    logger.info('Convert peak files for metadata file %s to features file %s',
+                metadata_filename, feat_filename)
+    if not os.path.isdir(feat_dir):
+        try:
+            os.makedirs(feat_dir)
+        except OSError:
+            pass
+    with h5py.File(feat_filename, 'a') as f_feat:
+        for (dataset, filename), metadata_filename in metadata.groupby(
+                level=['dataset', 'filename']):
+            if f'{dataset}{filename}' not in f_feat:
+                metadata_filename = metadata_filename.set_index('scan')
+                for spec, spec_enc in _peaks_to_features(
+                        dataset, filename, metadata_filename, enc):
+                    spec_hdf5 = f_feat.create_dataset(
+                        f'{dataset}/{filename}/{spec.identifier}',
+                        data=spec_enc, compression='lzf')
+                    spec_hdf5.attrs['sequence'] = spec.peptide
+                    spec_hdf5.attrs['charge'] = spec.precursor_charge
+                    spec_hdf5.attrs['mz'] = spec.precursor_mz
