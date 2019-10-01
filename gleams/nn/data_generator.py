@@ -13,7 +13,7 @@ class PairSequence(Sequence):
     def __init__(self, filename_metadata: str, filename_feat: str,
                  filename_pairs_pos: str, filename_pairs_neg: str,
                  batch_size: int, feature_split: Tuple[int, int],
-                 max_num_pairs: int = None):
+                 max_num_pairs: int = None, shuffle: bool = True):
         """
         Initialize the PairSequence generator.
 
@@ -46,6 +46,9 @@ class PairSequence(Sequence):
             features, fragment features, reference spectra features).
         max_num_pairs : int
             Maximum number of pairs to include.
+        shuffle : bool
+            Whether to shuffle the order of the batches at the beginning of
+            each epoch.
         """
         metadata = pd.read_csv(filename_metadata,
                                usecols=['dataset', 'filename', 'scan'],
@@ -67,6 +70,8 @@ class PairSequence(Sequence):
 
         self.batch_size = batch_size
         self.feature_split = feature_split
+        self.shuffle = shuffle
+        self.epoch_count = 0
 
     def __len__(self) -> int:
         """
@@ -114,6 +119,12 @@ class PairSequence(Sequence):
 
         return (_features_to_arrays(batch_x1, batch_x2, *self.feature_split),
                 np.asarray(batch_y))
+
+    def on_epoch_end(self):
+        self.epoch_count += 1
+        if self.shuffle and self.epoch_count % len(self) == 0:
+            np.random.shuffle(self.pairs_pos)
+            np.random.shuffle(self.pairs_neg)
 
 
 def _features_to_arrays(x1: List[np.ndarray], x2: List[np.ndarray],
