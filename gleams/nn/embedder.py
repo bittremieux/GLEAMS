@@ -225,7 +225,7 @@ class Embedder:
         self.model.compile(Adam(self.lr), contrastive_loss)
 
     def train(self, train_generator: data_generator.PairSequence,
-              num_epochs: int = 1,
+              steps_per_epoch: int = None, num_epochs: int = 1,
               val_generator: data_generator.PairSequence = None) -> None:
         """
         Train the neural network.
@@ -234,6 +234,9 @@ class Embedder:
         ----------
         train_generator : data_generator.PairSequence
             The training data generator.
+        steps_per_epoch : int
+             Total number of in each epoch. Useful to record the validation
+             loss at specific intervals.
         num_epochs : int
             The number of epochs for which training occurs.
         val_generator : data_generator.PairSequence
@@ -250,8 +253,9 @@ class Embedder:
                      CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
-        self.model.fit_generator(train_generator, epochs=num_epochs,
-                                 callbacks=callbacks,
+        self.model.fit_generator(train_generator,
+                                 steps_per_epoch=steps_per_epoch,
+                                 epochs=num_epochs, callbacks=callbacks,
                                  validation_data=val_generator)
 
     def predict(self, x):

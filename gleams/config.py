@@ -69,6 +69,7 @@ loss_label_certainty = 0.99
 margin = 1
 lr = 0.0002
 batch_size = 1024
+steps_per_epoch = 200  # 1024 * 200 = 204800 samples per epoch
 num_epochs = 60
 max_num_pairs_train = None
 max_num_pairs_val = 50000

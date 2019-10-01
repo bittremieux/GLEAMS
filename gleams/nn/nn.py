@@ -53,7 +53,8 @@ def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
         filename_metadata, filename_feat,
         filename_val_pairs_pos, filename_val_pairs_neg,
         config.batch_size, feature_split, config.max_num_pairs_val, False)
-    emb.train(train_generator, config.num_epochs, val_generator)
+    emb.train(train_generator, config.steps_per_epoch, config.num_epochs,
+              val_generator)
     train_generator.f_feat.close()
     val_generator.f_feat.close()
 
