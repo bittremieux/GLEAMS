@@ -48,11 +48,11 @@ def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
     train_generator = data_generator.PairSequence(
         filename_metadata, filename_feat,
         filename_train_pairs_pos, filename_train_pairs_neg,
-        config.batch_size, feature_split)
+        config.batch_size, feature_split, config.max_num_pairs_train)
     val_generator = data_generator.PairSequence(
         filename_metadata, filename_feat,
         filename_val_pairs_pos, filename_val_pairs_neg,
-        config.batch_size, feature_split)
+        config.batch_size, feature_split, config.max_num_pairs_val)
     emb.train(train_generator, config.num_epochs, val_generator)
     train_generator.f_feat.close()
     val_generator.f_feat.close()

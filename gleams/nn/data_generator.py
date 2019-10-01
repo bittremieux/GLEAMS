@@ -12,7 +12,8 @@ class PairSequence(Sequence):
 
     def __init__(self, filename_metadata: str, filename_feat: str,
                  filename_pairs_pos: str, filename_pairs_neg: str,
-                 batch_size: int, feature_split: Tuple[int, int]):
+                 batch_size: int, feature_split: Tuple[int, int],
+                 max_num_pairs: int = None):
         """
         Initialize the PairSequence generator.
 
@@ -43,6 +44,8 @@ class PairSequence(Sequence):
             Indexes on which the feature vectors are split into individual
             inputs to the separate parts of the neural network (precursor
             features, fragment features, reference spectra features).
+        max_num_pairs : int
+            Maximum number of pairs to include.
         """
         metadata = pd.read_csv(filename_metadata,
                                usecols=['dataset', 'filename', 'scan'],
@@ -57,6 +60,8 @@ class PairSequence(Sequence):
         pairs_neg = np.loadtxt(filename_pairs_neg, np.uint32, delimiter=',')
         np.random.shuffle(pairs_neg)
         num_pairs = min(len(pairs_pos), len(pairs_neg))
+        if max_num_pairs is not None:
+            num_pairs = min(num_pairs, max_num_pairs // 2)
         self.pairs_pos = pairs_pos[:num_pairs]
         self.pairs_neg = pairs_neg[:num_pairs]
 

@@ -70,3 +70,5 @@ margin = 1
 lr = 0.0002
 batch_size = 1024
 num_epochs = 60
+max_num_pairs_train = None
+max_num_pairs_val = 50000
