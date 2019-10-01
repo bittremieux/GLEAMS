@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 # Make sure all code is in the PATH.
@@ -24,6 +25,15 @@ from gleams.metadata import metadata
 from gleams.nn import nn
 
 
+# Fix logging hijacking by Tensorflow/abseil.
+# FIXME: https://github.com/abseil/abseil-py/issues/99
+# FIXME: https://github.com/tensorflow/tensorflow/issues/26691
+try:
+    import absl.logging
+    logging.root.removeHandler(absl.logging._absl_handler)
+    absl.logging._warn_preinit_stderr = False
+except Exception as e:
+    pass
 default_args = {
     'owner': 'gleams',
     'depends_on_past': False,
