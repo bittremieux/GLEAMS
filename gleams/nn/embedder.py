@@ -247,8 +247,7 @@ class Embedder:
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
-                     # TODO
-                     # CrocHistory(x_val, y_val, filename_log),
+                     CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
         self.model.fit_generator(train_generator, epochs=num_epochs,
@@ -267,11 +266,10 @@ class CrocHistory(keras.callbacks.Callback):
     # Alpha = 14 maps x = 0.05 to 0.5.
     alpha = 14
 
-    def __init__(self, x_val, y_val, log_filename=None):
+    def __init__(self, val_generator, log_filename=None):
         super().__init__()
 
-        self.x_val = x_val
-        self.y_val = y_val
+        self.val_generator = val_generator
         self.log_filename = log_filename
         self.croc_aucs = None
 
@@ -279,12 +277,14 @@ class CrocHistory(keras.callbacks.Callback):
         self.croc_aucs = []
 
     def on_epoch_end(self, epoch, logs=None):
-        if self.x_val is not None:
-            y_pred = self.model.predict(self.x_val)
-            fpr, tpr, _ = roc_curve(self.y_val, 1 - y_pred / y_pred.max())
-            # Expontial CROC transformation from Swamidass et al. 2010.
-            croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
-                        (1 - np.exp(-self.alpha)))
-            croc_auc = auc(croc_fpr, tpr)
-            self.croc_aucs.append(croc_auc)
-            logs['croc_auc'] = auc(croc_fpr, tpr)
+        if self.val_generator is not None:
+            for batch_i in range(len(self.val_generator)):
+                batch_x, batch_y = self.val_generator[batch_i]
+                y_pred = self.model.predict(batch_x)
+                fpr, tpr, _ = roc_curve(batch_y, 1 - y_pred / y_pred.max())
+                # Exponential CROC transformation from Swamidass et al. 2010.
+                croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
+                            (1 - np.exp(-self.alpha)))
+                croc_auc = auc(croc_fpr, tpr)
+                self.croc_aucs.append(croc_auc)
+                logs['croc_auc'] = auc(croc_fpr, tpr)
