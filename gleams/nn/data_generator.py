@@ -77,7 +77,7 @@ class PairSequence(Sequence):
         int
             The number of batches.
         """
-        return int(math.ceil(len(self.pairs_pos) / self.batch_size)) * 2
+        return int(math.ceil(2 * len(self.pairs_pos) / self.batch_size))
 
     def __getitem__(self, idx: int) -> Tuple[List[np.ndarray], np.ndarray]:
         """
