@@ -95,8 +95,7 @@ def split_metadata_train_val_test(
     logger.info('Split the metadata file into train (~%.f%%), validation '
                 '(~%.f%%), and test (~%.f%%) sets', perc_train, perc_val,
                 perc_test)
-    datasets = metadata.groupby('dataset')['scan'].count().sample(
-        frac=1, random_state=17)
+    datasets = metadata.groupby('dataset')['scan'].count().sample(frac=1)
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
         logger.debug('Save validation metadata file to %s',

@@ -9,10 +9,13 @@ sys.path.append(os.path.normpath(os.path.join(os.path.dirname(__file__),
 # 3: No ERROR logging.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
+# Initialize all random seeds before importing any packages.
+from gleams import rndm
+rndm.set_seeds()
+
 import datetime
 
 from airflow import DAG
-from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
 
 from gleams import config
