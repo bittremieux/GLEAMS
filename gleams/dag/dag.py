@@ -1,7 +1,13 @@
 import os
 import sys
+# Make sure all code is in the PATH.
 sys.path.append(os.path.normpath(os.path.join(os.path.dirname(__file__),
                                               os.pardir, os.pardir)))
+# Limit annoying Tensforflow logging to only warnings and errors.
+# 1: No FILTER logging.
+# 2: No WARNING logging.
+# 3: No ERROR logging.
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
 import datetime
 
