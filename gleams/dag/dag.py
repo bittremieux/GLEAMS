@@ -18,6 +18,7 @@ import datetime
 
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
+import tensorflow.compat.v1 as tf
 
 from gleams import config
 from gleams.feature import feature
@@ -34,6 +35,10 @@ try:
     absl.logging._warn_preinit_stderr = False
 except Exception as e:
     pass
+# Disable Tensorflow v1 deprecation warnings.
+tf.logging.set_verbosity(tf.logging.ERROR)
+
+
 default_args = {
     'owner': 'gleams',
     'depends_on_past': False,
