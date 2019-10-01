@@ -12,6 +12,7 @@ from airflow.operators.python_operator import PythonOperator
 from gleams import config
 from gleams.feature import feature
 from gleams.metadata import metadata
+from gleams.nn import nn
 
 
 default_args = {
@@ -66,10 +67,27 @@ with DAG('gleams', default_args=default_args,
     t_enc_feat = PythonOperator(
         task_id='convert_peaks_to_features',
         python_callable=feature.convert_peaks_to_features,
-        op_kwargs={'metadata_filename': config.metadata_filename}
+        op_kwargs={'metadata_filename': config.metadata_filename,
+                   'feat_filename': config.feat_filename}
     )
-    t_train = DummyOperator(
-        task_id='train_model'
+    t_train = PythonOperator(
+        task_id='train_nn',
+        python_callable=nn.train_nn,
+        op_kwargs={'filename_metadata': config.metadata_filename,
+                   'filename_feat': config.feat_filename,
+                   'filename_model': config.model_filename,
+                   'filename_train_pairs_pos':
+                       config.metadata_filename.replace(
+                           '.csv', 'train_pairs_pos.csv'),
+                   'filename_train_pairs_neg':
+                       config.metadata_filename.replace(
+                           '.csv', 'train_pairs_neg.csv'),
+                   'filename_val_pairs_pos':
+                       config.metadata_filename.replace(
+                           '.csv', 'val_pairs_pos.csv'),
+                   'filename_val_pairs_neg':
+                       config.metadata_filename.replace(
+                           '.csv', 'val_pairs_neg.csv')}
     )
 
     t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]

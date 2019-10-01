@@ -56,18 +56,20 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
             yield spec, enc.encode(spec)
 
 
-def convert_peaks_to_features(metadata_filename: str):
+def convert_peaks_to_features(metadata_filename: str, feat_filename: str)\
+        -> None:
     """
     Convert all peak files listed in the given metadata file to features.
 
-    Features will be stored as data/feature/{dataset}/{filename}.npz files
-    corresponding to the original peak files.
-    Existing feature files will _not_ be converted again.
+    Features will be stored as in the given HDF5 file.
+    Existing features will _not_ be converted again.
 
     Parameters
     ----------
     metadata_filename : str
-        The metadata file name. Should have a .csv extension.
+        The metadata file name.
+    feat_filename : str
+        The HDF5 feature file name.
     """
     metadata = pd.read_csv(metadata_filename,
                            index_col=['dataset', 'filename'],
@@ -87,10 +89,7 @@ def convert_peaks_to_features(metadata_filename: str):
             config.num_ref_spectra)
     ])
 
-    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
-    feat_filename = os.path.join(
-        feat_dir, (os.path.splitext(os.path.basename(metadata_filename))[0]
-                   .replace('metadata_', 'feature_') + '.hdf5'))
+    feat_dir = os.path.dirname(feat_filename)
     logger.info('Convert peak files for metadata file %s to features file %s',
                 metadata_filename, feat_filename)
     if not os.path.isdir(feat_dir):

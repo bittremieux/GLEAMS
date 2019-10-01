@@ -1,5 +1,7 @@
 import os
 
+from gleams.feature import spectrum
+
 
 # MassIVE-KB metadata processing and pair generation.
 massivekb_task_id = '82c0124b'  # Version 2018-06-15.
@@ -10,6 +12,12 @@ massivekb_filename = os.path.join(
 metadata_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'metadata',
     f'metadata_{massivekb_task_id}.csv')
+feat_filename = os.path.join(
+    os.environ['GLEAMS_HOME'], 'data', 'feature',
+    f'feature_{massivekb_task_id}.hdf5')
+model_filename = os.path.join(
+    os.environ['GLEAMS_HOME'], 'data', 'model',
+    f'gleams_{massivekb_task_id}.hdf5')
 val_ratio = 0.1
 test_ratio = 0.1
 split_ratio_tolerance = 0.01
@@ -20,7 +28,7 @@ pair_mz_tolerance = 10  # ppm
 # Minimum number of peaks for an MS/MS spectrum to be considered.
 min_peaks = 10
 min_mz_range = 250.
-remove_precursor_tolerance = 0.05
+remove_precursor_tolerance = 0.05  # Da
 min_intensity = 0.01
 max_peaks_used = 150
 scaling = 'sqrt'
@@ -36,22 +44,22 @@ precursor_mass_min = 400.
 precursor_mass_max = 6000.
 num_bits_precursor_mass = 27
 precursor_charge_max = 7
+num_precursor_features = (num_bits_precursor_mz + num_bits_precursor_mass +
+                          precursor_charge_max)
 
 # Fragment encoding.
 averagine_peak_separation_da = 1.0005079
 fragment_mz_min = averagine_peak_separation_da * 50.5
 fragment_mz_max = 2500.
 bin_size = averagine_peak_separation_da
+num_fragment_features = spectrum.get_num_bins(fragment_mz_min, fragment_mz_max,
+                                              bin_size)
 
 # Reference spectra encoding.
 ref_spectra_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'src', 'data', 'gleams_reference_spectra.mgf')
 num_ref_spectra = 500
-fragment_mz_tol = 0.05
-
-# Theoretical spectrum simulation.
-ms2pip_model = 'HCDch2'
-ms2pip_batch_size = 100000
+fragment_mz_tol = 0.05  # Da
 
 
 # Neural network settings.

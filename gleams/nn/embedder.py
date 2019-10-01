@@ -2,7 +2,6 @@ import os
 
 import keras
 import numpy as np
-import pandas as pd
 from keras import backend as K
 from keras import Input
 from keras.callbacks import CSVLogger, ModelCheckpoint, TensorBoard
@@ -13,6 +12,7 @@ from keras.optimizers import Adam
 from sklearn.metrics import auc, roc_curve
 
 from gleams import config
+from gleams.nn import data_generator
 
 
 def euclidean_distance(vects):
@@ -224,8 +224,9 @@ class Embedder:
                            outputs=distance)
         self.model.compile(Adam(self.lr), contrastive_loss)
 
-    def train(self, x_train, y_train, batch_size: int, num_epochs: int,
-              x_val=None, y_val=None):
+    def train(self, train_generator: data_generator.PairSequence,
+              num_epochs: int = 1,
+              val_generator: data_generator.PairSequence = None) -> None:
         if self.model is None:
             raise ValueError("The model hasn't been constructed yet")
 
@@ -234,14 +235,13 @@ class Embedder:
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
-                     CrocHistory(x_val, y_val, filename_log),
+                     # TODO
+                     # CrocHistory(x_val, y_val, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
-        self.model.fit(
-            x_train, y_train, batch_size, num_epochs, callbacks=callbacks,
-            validation_data=((x_val, y_val)
-                             if x_val is not None and y_val is not None
-                             else None))
+        self.model.fit_generator(train_generator, epochs=num_epochs,
+                                 callbacks=callbacks,
+                                 validation_data=val_generator)
 
     def predict(self, x):
         return self.model.predict(x)
