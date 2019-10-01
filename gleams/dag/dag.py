@@ -68,18 +68,10 @@ with DAG('gleams', default_args=default_args,
         python_callable=feature.convert_peaks_to_features,
         op_kwargs={'metadata_filename': config.metadata_filename}
     )
-    t_feat_combine = [
-        PythonOperator(
-            task_id=f'merge_features_{suffix}',
-            python_callable=feature.merge_features,
-            op_kwargs={'metadata_filename': config.metadata_filename.replace(
-                '.csv', f'_{suffix}.csv')})
-        for suffix in ['train', 'val', 'test']
-    ]
     t_train = DummyOperator(
         task_id='train_model'
     )
 
     t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]
-    t_download >> t_enc_feat >> t_feat_combine
-    [*t_pairs_pos, *t_pairs_neg, *t_feat_combine] >> t_train
+    t_download >> t_enc_feat
+    [*t_pairs_pos, *t_pairs_neg, t_enc_feat] >> t_train
