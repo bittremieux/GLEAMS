@@ -11,6 +11,26 @@ logger = logging.getLogger('gleams')
 def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
              filename_train_pairs_pos: str, filename_train_pairs_neg: str,
              filename_val_pairs_pos: str, filename_val_pairs_neg: str):
+    """
+    Train the GLEAMS neural network.
+
+    Parameters
+    ----------
+    filename_metadata : str
+        The file name of the PSM metadata file.
+    filename_feat : str
+        The file name of the HDF5 feature file.
+    filename_model : str
+        The file name where the model will be saved.
+    filename_train_pairs_pos : str
+        The file name of the positive training pair indexes.
+    filename_train_pairs_neg : str
+        The file name of the negative training pair indexes.
+    filename_val_pairs_pos : str
+        The file name of the positive validation pair indexes.
+    filename_val_pairs_neg : str
+        The file name of the negative validation pair indexes.
+    """
     # Build the embedder model.
     model_dir = os.path.dirname(filename_model)
     if not os.path.isdir(model_dir):

@@ -227,6 +227,18 @@ class Embedder:
     def train(self, train_generator: data_generator.PairSequence,
               num_epochs: int = 1,
               val_generator: data_generator.PairSequence = None) -> None:
+        """
+        Train the neural network.
+
+        Parameters
+        ----------
+        train_generator : data_generator.PairSequence
+            The training data generator.
+        num_epochs : int
+            The number of epochs for which training occurs.
+        val_generator : data_generator.PairSequence
+            The validation data generator.
+        """
         if self.model is None:
             raise ValueError("The model hasn't been constructed yet")
 
