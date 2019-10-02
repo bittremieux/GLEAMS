@@ -102,16 +102,16 @@ with DAG('gleams', default_args=default_args,
                    'filename_model': config.model_filename,
                    'filename_train_pairs_pos':
                        config.metadata_filename.replace(
-                           '.csv', 'train_pairs_pos.csv'),
+                           '.csv', '_train_pairs_pos.csv'),
                    'filename_train_pairs_neg':
                        config.metadata_filename.replace(
-                           '.csv', 'train_pairs_neg.csv'),
+                           '.csv', '_train_pairs_neg.csv'),
                    'filename_val_pairs_pos':
                        config.metadata_filename.replace(
-                           '.csv', 'val_pairs_pos.csv'),
+                           '.csv', '_val_pairs_pos.csv'),
                    'filename_val_pairs_neg':
                        config.metadata_filename.replace(
-                           '.csv', 'val_pairs_neg.csv')}
+                           '.csv', '_val_pairs_neg.csv')}
     )
 
     t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]
