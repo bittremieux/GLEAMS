@@ -100,7 +100,7 @@ def convert_peaks_to_features(metadata_filename: str, feat_filename: str)\
     with h5py.File(feat_filename, 'a') as f_feat:
         for (dataset, filename), metadata_filename in metadata.groupby(
                 level=['dataset', 'filename']):
-            if f'{dataset}{filename}' not in f_feat:
+            if f'{dataset}/{filename}' not in f_feat:
                 metadata_filename = metadata_filename.set_index('scan')
                 for spec, spec_enc in _peaks_to_features(
                         dataset, filename, metadata_filename, enc):
