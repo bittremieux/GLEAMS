@@ -45,18 +45,18 @@ def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
     logger.info('Train the GLEAMS siamese neural network')
     feature_split = (config.num_precursor_features,
                      config.num_precursor_features + config.num_fragment_features)
-    train_generator = data_generator.PairSequence(
-        filename_metadata, filename_feat,
-        filename_train_pairs_pos, filename_train_pairs_neg,
-        config.batch_size, feature_split, config.max_num_pairs_train)
-    val_generator = data_generator.PairSequence(
-        filename_metadata, filename_feat,
-        filename_val_pairs_pos, filename_val_pairs_neg,
-        config.batch_size, feature_split, config.max_num_pairs_val, False)
-    emb.train(train_generator, config.steps_per_epoch, config.num_epochs,
-              val_generator)
-    train_generator.f_feat.close()
-    val_generator.f_feat.close()
+    with data_generator.PairSequence(
+                filename_metadata, filename_feat,
+                filename_train_pairs_pos, filename_train_pairs_neg,
+                config.batch_size, feature_split,
+                config.max_num_pairs_train) as train_generator,\
+            data_generator.PairSequence(
+                filename_metadata, filename_feat,
+                filename_val_pairs_pos, filename_val_pairs_neg,
+                config.batch_size, feature_split,
+                config.max_num_pairs_val, False) as val_generator:
+        emb.train(train_generator, config.steps_per_epoch, config.num_epochs,
+                  val_generator)
 
     logger.info('Save the trained GLEAMS siamese neural network')
     emb.save()

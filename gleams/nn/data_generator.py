@@ -55,8 +55,8 @@ class PairSequence(Sequence):
                                dtype=str)
         self.spec_keys = (metadata['dataset'] + '/' + metadata['filename']
                           + '/' + metadata['scan'])
-
-        self.f_feat = h5py.File(filename_feat, 'r')
+        self.filename_feat = filename_feat
+        self.f_feat = None
 
         pairs_pos = np.loadtxt(filename_pairs_pos, np.uint32, delimiter=',')
         np.random.shuffle(pairs_pos)
@@ -125,6 +125,13 @@ class PairSequence(Sequence):
         if self.shuffle and self.epoch_count % len(self) == 0:
             np.random.shuffle(self.pairs_pos)
             np.random.shuffle(self.pairs_neg)
+
+    def __enter__(self):
+        self.f_feat = h5py.File(self.filename_feat, 'r')
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.f_feat.close()
 
 
 def _features_to_arrays(x1: List[np.ndarray], x2: List[np.ndarray],
