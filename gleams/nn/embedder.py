@@ -109,24 +109,26 @@ class Embedder:
         self.lr = lr
         self.filename = filename
 
-        self.model = None
+        self.base_model = None
+        self.siamese_model = None
 
     def save(self):
         """
         Save a model and its training status.
         """
-        if self.model is None:
-            raise ValueError('The model hasn\'t been constructed yet')
+        if self.base_model is None or self.siamese_model is None:
+            raise ValueError("The model hasn't been constructed yet")
         else:
-            self.model.save(self.filename)
+            self.siamese_model.save(self.filename)
 
     def load(self):
         """
         Load a saved model and its training status from the given file.
         """
-        self.model = keras.models.load_model(
+        self.siamese_model = keras.models.load_model(
             self.filename,
             custom_objects={'contrastive_loss': contrastive_loss})
+        self.base_model = self.siamese_model.get_layer('model_1')
 
     def _build_base_model(self) -> Model:
         """
@@ -205,24 +207,24 @@ class Embedder:
         """
         # Both arms of the Siamese network use the same model, i.e. the weights
         # are tied.
-        base_model = self._build_base_model()
+        self.base_model = self._build_base_model()
         input_left = [Input((self.num_precursor_features,)),
                       Input((self.num_fragment_features,)),
                       Input((self.num_ref_spectra_features,))]
         input_right = [Input((self.num_precursor_features,)),
                        Input((self.num_fragment_features,)),
                        Input((self.num_ref_spectra_features,))]
-        output_left = base_model(input_left)
-        output_right = base_model(input_right)
+        output_left = self.base_model(input_left)
+        output_right = self.base_model(input_right)
 
         # Euclidean distance between two embeddings.
         distance = (Lambda(euclidean_distance, eucl_dist_output_shape)
                     ([output_left, output_right]))
 
         # Train using Adam to optimize the contrastive loss.
-        self.model = Model(inputs=[*input_left, *input_right],
-                           outputs=distance)
-        self.model.compile(Adam(self.lr), contrastive_loss)
+        self.siamese_model = Model(inputs=[*input_left, *input_right],
+                                   outputs=distance)
+        self.siamese_model.compile(Adam(self.lr), contrastive_loss)
 
     def train(self, train_generator: data_generator.PairSequence,
               steps_per_epoch: int = None, num_epochs: int = 1,
@@ -242,7 +244,7 @@ class Embedder:
         val_generator : data_generator.PairSequence
             The validation data generator.
         """
-        if self.model is None:
+        if self.siamese_model is None:
             raise ValueError("The model hasn't been constructed yet")
 
         filename, ext = os.path.splitext(self.filename)
@@ -253,13 +255,13 @@ class Embedder:
                      CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
-        self.model.fit_generator(train_generator,
-                                 steps_per_epoch=steps_per_epoch,
-                                 epochs=num_epochs, callbacks=callbacks,
-                                 validation_data=val_generator)
+        self.siamese_model.fit_generator(
+            train_generator, steps_per_epoch=steps_per_epoch,
+            epochs=num_epochs, callbacks=callbacks,
+            validation_data=val_generator)
 
-    def predict(self, x):
-        return self.model.predict(x)
+    def embed(self, x):
+        return self.base_model.predict(x)
 
 
 class CrocHistory(keras.callbacks.Callback):
