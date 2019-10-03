@@ -169,14 +169,13 @@ def download_massive_file(massive_filename: str) -> None:
         except OSError:
             pass
     peak_filename = massive_filename.rsplit('/', 1)[-1]
-    local_filename = os.path.join(dataset_dir, peak_filename)
-    if not os.path.isfile(local_filename):
-        logger.debug('Download file %s/%s', dataset, peak_filename)
-        url = f'ftp://massive.ucsd.edu/{massive_filename}'
-        proc = subprocess.run(['wget', '-N', url, '-P', dataset_dir, '-q'])
-        if proc.returncode != 0:
-            logger.warning('Could not download file %s/%s: wget error %d',
-                           dataset, peak_filename, proc.returncode)
+    logger.debug('Download file %s/%s', dataset, peak_filename)
+    url = f'ftp://massive.ucsd.edu/{massive_filename}'
+    proc = subprocess.run(['wget', '-N', '--retry-connrefused',
+                           '-P', dataset_dir, '-q', url])
+    if proc.returncode != 0:
+        logger.warning('Could not download file %s/%s: wget error %d',
+                       dataset, peak_filename, proc.returncode)
 
 
 def download_massivekb_peaks(massivekb_filename: str) -> None:
