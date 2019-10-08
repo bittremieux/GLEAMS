@@ -1,4 +1,6 @@
+import logging
 import os
+from typing import List
 
 import keras
 import numpy as np
@@ -9,10 +11,14 @@ from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
     MaxPooling1D, Reshape
 from keras.models import Model
 from keras.optimizers import Adam
+from keras.utils import multi_gpu_utils
 from sklearn.metrics import auc, roc_curve
 
 from gleams import config
 from gleams.nn import data_generator
+
+
+logger = logging.getLogger('gleams')
 
 
 def euclidean_distance(vects):
@@ -86,7 +92,7 @@ class Embedder:
 
     def __init__(self, num_precursor_features: int, num_fragment_features: int,
                  num_ref_spectra_features: int, lr: float,
-                 filename: str = 'gleams.h5'):
+                 filename: str = 'gleams.hdf5'):
         """
         Instantiate the Embbeder based on the given number of input features.
 
@@ -109,33 +115,76 @@ class Embedder:
         self.lr = lr
         self.filename = filename
 
-        self.base_model = None
-        self.siamese_model = None
+        self.siamese_model = self.siamese_model_parallel = None
 
-    def save(self):
+    def _get_base_model(self) -> Model:
         """
-        Save a model and its training status.
+        Get the base embedder model (i.e. a single arm of the Siamese model).
+
+        Returns
+        -------
+        Model
+            The embedder model.
         """
-        if self.base_model is None or self.siamese_model is None:
-            raise ValueError("The model hasn't been constructed yet")
+        if self.siamese_model_parallel is None:
+            raise ValueError("The Siamese model hasn't been compiled yet")
+        else:
+            return self.siamese_model_parallel.get_layer('model_1')
+
+    def _init_multi_gpu(self) -> Model:
+        """
+        Replicate the Siamese model over multiple GPUs if possible.
+
+        If multiple GPUs are used the learning rate is multiplied accordingly.
+
+        Returns
+        -------
+        Model
+            The multi-GPU version of the Siamese model.
+        """
+        if self.siamese_model is None:
+            raise ValueError("The Siamese model hasn't been compiled yet")
+        else:
+            # Use multiple GPUs if available.
+            try:
+                model = multi_gpu_utils.multi_gpu_model(self.siamese_model,
+                                                        cpu_relocation=True)
+                available_devices = [
+                    multi_gpu_utils._normalize_device_name(name)
+                    for name in multi_gpu_utils._get_available_devices()]
+                num_gpus = len([x for x in available_devices if 'gpu' in x])
+                self.lr *= num_gpus
+                logger.info('Parallelizing the Siamese model over multiple '
+                            'GPUs')
+            except ValueError:
+                model = self.siamese_model
+                logger.info('Running the Siamese model on a single GPU')
+            return model
+
+    def save(self) -> None:
+        """
+        Save the Siamese model and its training status.
+        """
+        if self.siamese_model is None:
+            raise ValueError("The Siamese model hasn't been compiled yet")
         else:
             self.siamese_model.save(self.filename)
 
-    def load(self):
+    def load(self) -> None:
         """
-        Load a saved model and its training status from the given file.
+        Load the saved Siamese model and its training status from the given
+        file.
         """
         self.siamese_model = keras.models.load_model(
             self.filename,
             custom_objects={'contrastive_loss': contrastive_loss})
-        self.base_model = self.siamese_model.get_layer('model_1')
+        self.siamese_model_parallel = self._init_multi_gpu()
 
     def _build_base_model(self) -> Model:
         """
-        Construct the model architecture of a single arm of the Siamese
-        network.
+        Construct the embedder model (i.e. a single arm of the Siamese model).
 
-        The embedder network consists of the following elements:
+        The embedder model consists of the following elements:
         - Precursor features are processed using two fully-connected layers of
           dimensions 32 and 5. SELU activation is used.
         - The fragment features and reference spectra features are both
@@ -148,9 +197,7 @@ class Embedder:
         Returns
         -------
         Model
-            The Keras neural network model for a single arm of the Siamese
-            network that takes as input the features specified for this
-            Embedder.
+            The embedder model that takes as input the features specified.
         """
         # Precursor features are processed through two dense layers.
         precursor_input = Input((self.num_precursor_features,))
@@ -197,25 +244,25 @@ class Embedder:
                              ref_spectra_input],
                      outputs=[output_layer])
 
-    def build_siamese_model(self):
+    def build_siamese_model(self) -> None:
         """
-        Build the Embedder's Siamese network and compile it to optimize the
-        contrastive loss using Adam.
+        Build the Siamese model and compile it to optimize the contrastive loss
+        using Adam.
 
-        Both arms of the Siamese network will use the same base network, i.e.
+        Both arms of the Siamese network will use the same base model, i.e.
         the weights are tied between both arms.
         """
-        # Both arms of the Siamese network use the same model, i.e. the weights
-        # are tied.
-        self.base_model = self._build_base_model()
+        # Both arms of the Siamese network use the same model,
+        # i.e. the weights are tied.
+        base_model = self._build_base_model()
         input_left = [Input((self.num_precursor_features,)),
                       Input((self.num_fragment_features,)),
                       Input((self.num_ref_spectra_features,))]
         input_right = [Input((self.num_precursor_features,)),
                        Input((self.num_fragment_features,)),
                        Input((self.num_ref_spectra_features,))]
-        output_left = self.base_model(input_left)
-        output_right = self.base_model(input_right)
+        output_left = base_model(input_left)
+        output_right = base_model(input_right)
 
         # Euclidean distance between two embeddings.
         distance = (Lambda(euclidean_distance, eucl_dist_output_shape)
@@ -224,13 +271,14 @@ class Embedder:
         # Train using Adam to optimize the contrastive loss.
         self.siamese_model = Model(inputs=[*input_left, *input_right],
                                    outputs=distance)
-        self.siamese_model.compile(Adam(self.lr), contrastive_loss)
+        self.siamese_model_parallel = self._init_multi_gpu()
+        self.siamese_model_parallel.compile(Adam(self.lr), contrastive_loss)
 
     def train(self, train_generator: data_generator.PairSequence,
               steps_per_epoch: int = None, num_epochs: int = 1,
               val_generator: data_generator.PairSequence = None) -> None:
         """
-        Train the neural network.
+        Train the Siamese model.
 
         Parameters
         ----------
@@ -244,8 +292,8 @@ class Embedder:
         val_generator : data_generator.PairSequence
             The validation data generator.
         """
-        if self.siamese_model is None:
-            raise ValueError("The model hasn't been constructed yet")
+        if self.siamese_model_parallel is None:
+            raise ValueError("The Siamese model hasn't been compiled yet")
 
         filename, ext = os.path.splitext(self.filename)
         filename_log = f'{filename}.log'
@@ -255,13 +303,28 @@ class Embedder:
                      CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
-        self.siamese_model.fit_generator(
+        self.siamese_model_parallel.fit_generator(
             train_generator, steps_per_epoch=steps_per_epoch,
             epochs=num_epochs, callbacks=callbacks,
             validation_data=val_generator)
 
-    def embed(self, x):
-        return self.base_model.predict(x)
+    def embed(self, x: List[np.ndarray]) -> np.ndarray:
+        """
+        Transform samples using the embedder model.
+
+        Parameters
+        ----------
+        x : List[np.ndarray]
+            The input samples as a list of length three representing the
+            precursor features, fragment features, and reference spectra
+            features.
+
+        Returns
+        -------
+        np.ndarray
+            The embeddings of the given samples.
+        """
+        return self._get_base_model().predict(x)
 
 
 class CrocHistory(keras.callbacks.Callback):
