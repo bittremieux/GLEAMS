@@ -227,7 +227,7 @@ def generate_pairs_positive(metadata_filename: str) -> None:
         with open(filename, 'w') as f_out:
             for p1, p2 in itertools.chain(
                     *(same_row_nums.apply(functools.partial(
-                        itertools.combinations_with_replacement, r=2)))):
+                        itertools.combinations, r=2)))):
                 f_out.write(f'{p1},{p2}\n')
 
 
