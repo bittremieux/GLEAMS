@@ -8,24 +8,28 @@ from gleams.nn import data_generator, embedder
 logger = logging.getLogger('gleams')
 
 
-def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
-             filename_train_pairs_pos: str, filename_train_pairs_neg: str,
-             filename_val_pairs_pos: str, filename_val_pairs_neg: str):
+def train_nn(filename_feat: str, filename_model: str,
+             filename_metadata_train: str,  filename_train_pairs_pos: str,
+             filename_train_pairs_neg: str,
+             filename_metadata_val: str, filename_val_pairs_pos: str,
+             filename_val_pairs_neg: str):
     """
     Train the GLEAMS neural network.
 
     Parameters
     ----------
-    filename_metadata : str
-        The file name of the PSM metadata file.
     filename_feat : str
         The file name of the HDF5 feature file.
     filename_model : str
         The file name where the model will be saved.
+    filename_metadata_train : str
+        The file name of the training PSM metadata file.
     filename_train_pairs_pos : str
         The file name of the positive training pair indexes.
     filename_train_pairs_neg : str
         The file name of the negative training pair indexes.
+    filename_metadata_val : str
+        The file name of the validation PSM metadata file.
     filename_val_pairs_pos : str
         The file name of the positive validation pair indexes.
     filename_val_pairs_neg : str
@@ -46,12 +50,12 @@ def train_nn(filename_metadata: str, filename_feat: str, filename_model: str,
     feature_split = (config.num_precursor_features,
                      config.num_precursor_features + config.num_fragment_features)
     with data_generator.PairSequence(
-                filename_metadata, filename_feat,
+                filename_metadata_train, filename_feat,
                 filename_train_pairs_pos, filename_train_pairs_neg,
                 config.batch_size, feature_split,
                 config.max_num_pairs_train) as train_generator,\
             data_generator.PairSequence(
-                filename_metadata, filename_feat,
+                filename_metadata_val, filename_feat,
                 filename_val_pairs_pos, filename_val_pairs_neg,
                 config.batch_size, feature_split,
                 config.max_num_pairs_val, False) as val_generator:
