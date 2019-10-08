@@ -249,7 +249,7 @@ def generate_pairs_negative(metadata_filename: str,
     metadata_filename : str
         The metadata file name. Should have a .csv extension.
     mz_tolerance : float
-        Maximum precursor m/z tolerance for two PSMs to be considered a
+        Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
         negative pair.
     """
     filename = metadata_filename.replace('.csv', '_pairs_neg.csv')
@@ -293,7 +293,7 @@ def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
     mzs : np.ndarray
         A NumPy array of precursor m/z values for each PSM.
     mz_tolerance : float
-        Maximum precursor m/z tolerance for two PSMs to be considered a
+        Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
         negative pair.
 
     Returns
