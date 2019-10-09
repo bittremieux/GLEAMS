@@ -335,25 +335,21 @@ class CrocHistory(keras.callbacks.Callback):
     # Alpha = 14 maps x = 0.05 to 0.5.
     alpha = 14
 
-    def __init__(self, val_generator, log_filename=None):
+    def __init__(self, pair_generator, log_filename=None):
         super().__init__()
 
-        self.val_generator = val_generator
+        self.pair_generator = pair_generator
         self.log_filename = log_filename
-        self.croc_aucs = None
-
-    def on_train_begin(self, logs=None):
-        self.croc_aucs = []
 
     def on_epoch_end(self, epoch, logs=None):
-        if self.val_generator is not None:
-            for batch_i in range(len(self.val_generator)):
-                batch_x, batch_y = self.val_generator[batch_i]
+        if self.pair_generator is not None:
+            epoch_croc_aucs = []
+            for batch_i in range(len(self.pair_generator)):
+                batch_x, batch_y = self.pair_generator[batch_i]
                 y_pred = self.model.predict(batch_x)
                 fpr, tpr, _ = roc_curve(batch_y, 1 - y_pred / y_pred.max())
                 # Exponential CROC transformation from Swamidass et al. 2010.
                 croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
                             (1 - np.exp(-self.alpha)))
-                croc_auc = auc(croc_fpr, tpr)
-                self.croc_aucs.append(croc_auc)
-                logs['croc_auc'] = auc(croc_fpr, tpr)
+                epoch_croc_aucs.append(auc(croc_fpr, tpr))
+            logs['croc_auc'] = np.mean(epoch_croc_aucs)
