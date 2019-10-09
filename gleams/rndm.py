@@ -22,14 +22,14 @@ import tensorflow.compat.v1 as tf
 import random as rn
 
 
-def set_seeds():
+def set_seeds(my_seed=42):
     # The below is necessary for starting Numpy generated random numbers
     # in a well-defined initial state.
-    np.random.seed(42)
+    np.random.seed(my_seed)
 
     # The below is necessary for starting core Python generated random numbers
     # in a well-defined state.
-    rn.seed(12345)
+    rn.seed(my_seed)
 
     # Force TensorFlow to use single thread.
     # Multiple threads are a potential source of non-reproducible results.
@@ -43,7 +43,7 @@ def set_seeds():
     # in the TensorFlow backend have a well-defined initial state.
     # For further details, see:
     # https://www.tensorflow.org/api_docs/python/tf/set_random_seed
-    tf.set_random_seed(1234)
+    tf.set_random_seed(my_seed)
 
     sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
     K.set_session(sess)
