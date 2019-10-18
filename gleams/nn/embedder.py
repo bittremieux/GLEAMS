@@ -147,13 +147,15 @@ class Embedder:
         else:
             # Use multiple GPUs if available.
             try:
-                model = multi_gpu_utils.multi_gpu_model(self.siamese_model,
-                                                        cpu_relocation=True)
                 available_devices = [
                     multi_gpu_utils._normalize_device_name(name)
                     for name in multi_gpu_utils._get_available_devices()]
+                num_gpus = len([x for x in available_devices if '/gpu' in x])
+                model = multi_gpu_utils.multi_gpu_model(self.siamese_model,
+                                                        gpus=num_gpus,
+                                                        cpu_relocation=True)
                 logger.info('Parallelizing the Siamese model over %d GPUs',
-                            len([x for x in available_devices if '/gpu' in x]))
+                            num_gpus)
             except ValueError:
                 model = self.siamese_model
                 logger.info('Running the Siamese model on a single GPU')
