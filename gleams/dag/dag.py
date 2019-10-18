@@ -97,11 +97,11 @@ with DAG('gleams', default_args=default_args,
     t_train = PythonOperator(
         task_id='train_nn',
         python_callable=nn.train_nn,
-        op_kwargs={'filename_feat': config.feat_filename,
+            op_kwargs={'filename_feat': config.feat_filename,
                    'filename_model': config.model_filename,
                    'filename_metadata_train':
                        config.metadata_filename.replace(
-                           '.csv', f'_train.csv'),
+                           '.csv', '_train.csv'),
                    'filename_train_pairs_pos':
                        config.metadata_filename.replace(
                            '.csv', '_train_pairs_pos.csv'),
@@ -110,7 +110,7 @@ with DAG('gleams', default_args=default_args,
                            '.csv', '_train_pairs_neg.csv'),
                    'filename_metadata_val':
                        config.metadata_filename.replace(
-                           '.csv', f'_val.csv'),
+                           '.csv', '_val.csv'),
                    'filename_val_pairs_pos':
                        config.metadata_filename.replace(
                            '.csv', '_val_pairs_pos.csv'),
