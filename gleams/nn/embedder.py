@@ -1,12 +1,13 @@
 import logging
 import os
+import warnings
 from typing import List
 
 import keras
 import numpy as np
 from keras import backend as K
 from keras import Input
-from keras.callbacks import CSVLogger, ModelCheckpoint, TensorBoard
+from keras.callbacks import CSVLogger, TensorBoard
 from keras.layers import concatenate, Conv1D, Dense, Flatten, Lambda,\
     MaxPooling1D, Reshape
 from keras.models import Model
@@ -299,7 +300,8 @@ class Embedder:
         filename_log = f'{filename}.log'
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
-        callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
+        callbacks = [ModelCheckpointMultiGpuCompatible(
+            self.siamese_model, filename + '.epoch{epoch:03d}' + ext),
                      CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
@@ -325,6 +327,79 @@ class Embedder:
             The embeddings of the given samples.
         """
         return self._get_base_model().predict(x)
+
+
+class ModelCheckpointMultiGpuCompatible(keras.callbacks.Callback):
+
+    def __init__(self, model, filepath, monitor='val_loss', verbose=0,
+                 save_best_only=False, save_weights_only=False,
+                 mode='auto', period=1):
+        super().__init__()
+        self.model_to_save = model
+        self.monitor = monitor
+        self.verbose = verbose
+        self.filepath = filepath
+        self.save_best_only = save_best_only
+        self.save_weights_only = save_weights_only
+        self.period = period
+        self.epochs_since_last_save = 0
+
+        if mode not in ['auto', 'min', 'max']:
+            warnings.warn('ModelCheckpoint mode %s is unknown, fallback to '
+                          'auto mode.' % mode, RuntimeWarning)
+            mode = 'auto'
+
+        if mode == 'min':
+            self.monitor_op = np.less
+            self.best = np.Inf
+        elif mode == 'max':
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+        else:
+            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
+                self.monitor_op = np.greater
+                self.best = -np.Inf
+            else:
+                self.monitor_op = np.less
+                self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        self.epochs_since_last_save += 1
+        if self.epochs_since_last_save >= self.period:
+            self.epochs_since_last_save = 0
+            filepath = self.filepath.format(epoch=epoch + 1, **logs)
+            if self.save_best_only:
+                current = logs.get(self.monitor)
+                if current is None:
+                    warnings.warn('Can save best model only with %s available,'
+                                  ' skipping.' % self.monitor, RuntimeWarning)
+                else:
+                    if self.monitor_op(current, self.best):
+                        if self.verbose > 0:
+                            print('\nEpoch %05d: %s improved from %0.5f to '
+                                  '%0.5f, saving model to %s'
+                                  % (epoch + 1, self.monitor, self.best,
+                                     current, filepath))
+                        self.best = current
+                        if self.save_weights_only:
+                            self.model_to_save.save_weights(filepath,
+                                                            overwrite=True)
+                        else:
+                            self.model_to_save.save(filepath, overwrite=True)
+                    else:
+                        if self.verbose > 0:
+                            print('\nEpoch %05d: %s did not improve from '
+                                  '%0.5f' % (epoch + 1, self.monitor,
+                                             self.best))
+            else:
+                if self.verbose > 0:
+                    print('\nEpoch %05d: saving model to %s'
+                          % (epoch + 1, filepath))
+                if self.save_weights_only:
+                    self.model_to_save.save_weights(filepath, overwrite=True)
+                else:
+                    self.model_to_save.save(filepath, overwrite=True)
 
 
 class CrocHistory(keras.callbacks.Callback):
