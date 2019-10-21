@@ -92,7 +92,7 @@ with DAG('gleams', default_args=default_args,
         task_id='convert_peaks_to_features',
         python_callable=feature.convert_peaks_to_features,
         op_kwargs={'metadata_filename': config.metadata_filename,
-                   'feat_filename': config.feat_filename}
+                   'feat_dir': config.feat_dir}
     )
     t_train = PythonOperator(
         task_id='train_nn',
