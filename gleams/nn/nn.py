@@ -57,6 +57,9 @@ def train_nn(filename_feat: str, filename_model: str,
         multi_gpu_utils._normalize_device_name(name)
         for name in multi_gpu_utils._get_available_devices()]
     num_gpus = len([x for x in available_devices if '/gpu' in x])
+    if num_gpus == 0:
+        raise RuntimeError(f'No GPU found (available devices: '
+                           f'{", ".join(available_devices)})')
     batch_size = config.batch_size * num_gpus
     steps_per_epoch = config.steps_per_epoch // num_gpus
     if num_gpus > 1:
