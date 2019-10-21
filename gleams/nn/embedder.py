@@ -130,7 +130,7 @@ class Embedder:
         if self.siamese_model_parallel is None:
             raise ValueError("The Siamese model hasn't been compiled yet")
         else:
-            return self.siamese_model_parallel.get_layer('model_1')
+            return self.siamese_model_parallel.get_layer('base_model')
 
     def _init_multi_gpu(self) -> Model:
         """
@@ -201,13 +201,16 @@ class Embedder:
             The embedder model that takes as input the features specified.
         """
         # Precursor features are processed through two dense layers.
-        precursor_input = Input((self.num_precursor_features,))
-        precursor_dense32 = (Dense(32, activation='selu',
-                                   kernel_initializer='he_uniform')
-                             (precursor_input))
-        precursor_dense5 = (Dense(5, activation='selu',
-                                  kernel_initializer='he_uniform')
-                            (precursor_dense32))
+        precursor_input = Input((self.num_precursor_features,),
+                                name='input_precursor')
+        precursor_dense1 = (Dense(32, activation='selu',
+                                  kernel_initializer='he_uniform',
+                                  name='precursor_dense_1')
+                            (precursor_input))
+        precursor_dense2 = (Dense(5, activation='selu',
+                                  kernel_initializer='he_uniform',
+                                  name='precursor_dense_2')
+                            (precursor_dense1))
 
         filters = 30
         kernel_size = 3
@@ -216,34 +219,45 @@ class Embedder:
         pool_strides = 2
         # Fragment features are processed through a single convolutional and
         # max pooling layer.
-        fragment_input = Input((self.num_fragment_features,))
-        fragment_input_reshape =\
-            Reshape((self.num_fragment_features, 1))(fragment_input)
-        fragment_conv = Conv1D(filters, kernel_size, strides=strides,
-                               activation='selu')(fragment_input_reshape)
-        fragment_maxpool = MaxPooling1D(pool_size, pool_strides)(fragment_conv)
-        fragment_output = Flatten()(fragment_maxpool)
+        fragment_input = Input((self.num_fragment_features,),
+                               name='input_fragment')
+        fragment_input_reshape = (Reshape((self.num_fragment_features, 1),
+                                          name='fragment_input_reshape')
+                                  (fragment_input))
+        fragment_conv_1 = (Conv1D(filters, kernel_size, strides=strides,
+                                  activation='selu', name='fragment_conv_1')
+                           (fragment_input_reshape))
+        fragment_pool_1 = (MaxPooling1D(pool_size, pool_strides,
+                                        name='fragment_pool_1')
+                           (fragment_conv_1))
+        fragment_output = Flatten(name='fragment_flatten')(fragment_pool_1)
 
         # Reference spectra features are processed through a single
         # convolutional and max pooling layer.
-        ref_spectra_input = Input((self.num_ref_spectra_features,))
-        ref_spectra_input_reshape =\
-            Reshape((self.num_ref_spectra_features, 1))(ref_spectra_input)
-        ref_spectra_conv = Conv1D(filters, kernel_size, strides=strides,
-                                  activation='selu')(ref_spectra_input_reshape)
-        ref_spectra_maxpool = (MaxPooling1D(pool_size, pool_strides)
-                               (ref_spectra_conv))
-        ref_spectra_output = Flatten()(ref_spectra_maxpool)
+        ref_spectra_input = Input((self.num_ref_spectra_features,),
+                                  name='input_ref_spectra')
+        ref_spectra_input_reshape = (Reshape((
+            self.num_ref_spectra_features, 1),
+            name='ref_spectra_input_reshape')(ref_spectra_input))
+        ref_spectra_conv_1 = (Conv1D(filters, kernel_size, strides=strides,
+                                     activation='selu',
+                                     name='ref_spectra_conv_1')
+                              (ref_spectra_input_reshape))
+        ref_spectra_pool_1 = (MaxPooling1D(pool_size, pool_strides,
+                                           name='ref_spectra_pool_1')
+                              (ref_spectra_conv_1))
+        ref_spectra_output = (Flatten(name='ref_spectra_flatten')
+                              (ref_spectra_pool_1))
 
         # Combine all outputs and add a final dense layer.
         output_layer = (Dense(32, activation='selu',
-                              kernel_initializer='he_uniform')
-                        (concatenate([precursor_dense5, fragment_output,
+                              kernel_initializer='he_uniform', name='output')
+                        (concatenate([precursor_dense2, fragment_output,
                                       ref_spectra_output])))
 
         return Model(inputs=[precursor_input, fragment_input,
                              ref_spectra_input],
-                     outputs=[output_layer])
+                     outputs=[output_layer], name='base_model')
 
     def build_siamese_model(self) -> None:
         """
@@ -256,22 +270,29 @@ class Embedder:
         # Both arms of the Siamese network use the same model,
         # i.e. the weights are tied.
         base_model = self._build_base_model()
-        input_left = [Input((self.num_precursor_features,)),
-                      Input((self.num_fragment_features,)),
-                      Input((self.num_ref_spectra_features,))]
-        input_right = [Input((self.num_precursor_features,)),
-                       Input((self.num_fragment_features,)),
-                       Input((self.num_ref_spectra_features,))]
+        input_left = [Input((self.num_precursor_features,),
+                            name='input_precursor_left'),
+                      Input((self.num_fragment_features,),
+                            name='input_fragment_left'),
+                      Input((self.num_ref_spectra_features,),
+                            name='input_ref_spectra_left')]
+        input_right = [Input((self.num_precursor_features,),
+                             name='input_precursor_right'),
+                       Input((self.num_fragment_features,),
+                             name='input_fragment_right'),
+                       Input((self.num_ref_spectra_features,),
+                             name='input_ref_spectra_right')]
         output_left = base_model(input_left)
         output_right = base_model(input_right)
 
         # Euclidean distance between two embeddings.
-        distance = (Lambda(euclidean_distance, eucl_dist_output_shape)
+        distance = (Lambda(euclidean_distance, eucl_dist_output_shape,
+                           name='embedding_euclidean_distance')
                     ([output_left, output_right]))
 
         # Train using Adam to optimize the contrastive loss.
         self.siamese_model = Model(inputs=[*input_left, *input_right],
-                                   outputs=distance)
+                                   outputs=distance, name='siamese_model')
         self.siamese_model_parallel = self._init_multi_gpu()
         self.siamese_model_parallel.compile(Adam(self.lr), contrastive_loss)
 
