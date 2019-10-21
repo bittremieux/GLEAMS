@@ -97,7 +97,7 @@ with DAG('gleams', default_args=default_args,
     t_train = PythonOperator(
         task_id='train_nn',
         python_callable=nn.train_nn,
-            op_kwargs={'filename_feat': config.feat_filename,
+        op_kwargs={'filename_feat': config.feat_filename,
                    'filename_model': config.model_filename,
                    'filename_metadata_train':
                        config.metadata_filename.replace(
