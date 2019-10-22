@@ -1,6 +1,5 @@
 import logging
 import os
-import pickle
 from typing import List, Optional, Tuple
 
 import joblib
@@ -137,7 +136,8 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
                 np.save(filename_encodings, np.vstack(encodings))
                 index_df = (pd.DataFrame({'filename': index_filenames,
                                           'scan': index_scans}))
-                pq.write_table(pa.Table.from_pandas(index_df), filename_index)
+                pq.write_table(pa.Table.from_pandas(
+                    index_df, preserve_index=False), filename_index)
 
 
 def combine_features(metadata_filename: str, feat_dir: str) -> None:
@@ -168,7 +168,9 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
                            dataset)
         else:
             encodings.append(np.load(dataset_encodings_filename))
-            indexes.append(pq.read_table(dataset_index_filename))
+            dataset_table = pq.read_table(dataset_index_filename)
+            indexes.append(dataset_table.add_column(0, pa.Column.from_array(
+                'dataset', pa.array([dataset] * dataset_table.num_rows))))
     feat_filename = os.path.join(feat_dir, os.path.splitext(os.path.basename(
         metadata_filename))[0].replace('metadata', 'feature'))
     np.save(f'{feat_filename}.npy', np.vstack(encodings))
