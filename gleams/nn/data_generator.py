@@ -1,16 +1,17 @@
-import itertools
+import logging
 import math
 from typing import List, Tuple
 
-import h5py
 import numpy as np
-import pandas as pd
 from keras.utils import Sequence
+
+
+logger = logging.getLogger('gleams')
 
 
 class PairSequence(Sequence):
 
-    def __init__(self, filename_metadata: str, filename_feat: str,
+    def __init__(self, filename_feat: str,
                  filename_pairs_pos: str, filename_pairs_neg: str,
                  batch_size: int, feature_split: Tuple[int, int],
                  max_num_pairs: int = None, shuffle: bool = True):
@@ -23,14 +24,8 @@ class PairSequence(Sequence):
 
         Parameters
         ----------
-        filename_metadata : str
-            The file name of the metadata file. This file needs to have ordered
-            rows corresponding to the pair indexes (see below) and have the
-            columns 'dataset', 'filename', and 'scan'.
         filename_feat : str
-            The file name of the HDF5 feature file. Feature vectors for
-            individual scans should be stored under a dataset/filename/scan
-            key.
+            A NumPy binary file containing the encoded spectrum features.
         filename_pairs_pos : str
             The file name of the positive pair indexes. Comma-separated file
             with feature/spectrum indexes corresponding to the metadata file.
@@ -50,13 +45,7 @@ class PairSequence(Sequence):
             Whether to shuffle the order of the batches at the beginning of
             each epoch.
         """
-        metadata = pd.read_csv(filename_metadata,
-                               usecols=['dataset', 'filename', 'scan'],
-                               dtype=str)
-        self.spec_keys = (metadata['dataset'] + '/' + metadata['filename']
-                          + '/' + metadata['scan'])
-        self.filename_feat = filename_feat
-        self.f_feat = None
+        self.features = np.load(filename_feat)
 
         pairs_pos = np.loadtxt(filename_pairs_pos, np.uint32, delimiter=',')
         np.random.shuffle(pairs_pos)
@@ -65,6 +54,8 @@ class PairSequence(Sequence):
         num_pairs = min(len(pairs_pos), len(pairs_neg))
         if max_num_pairs is not None:
             num_pairs = min(num_pairs, max_num_pairs // 2)
+        logger.info('Using %d feature pairs from file %s', num_pairs,
+                    filename_feat)
         self.pairs_pos = pairs_pos[:num_pairs]
         self.pairs_neg = pairs_neg[:num_pairs]
 
@@ -106,32 +97,21 @@ class PairSequence(Sequence):
                                          (idx + 1) * self.batch_size // 2]
         batch_pairs_idx = np.vstack((batch_pairs_pos, batch_pairs_neg))
 
-        batch_x1, batch_x2, batch_y = [], [], []
-        for key1, key2, y in zip(
-                self.spec_keys.iloc[batch_pairs_idx[:, 0]],
-                self.spec_keys.iloc[batch_pairs_idx[:, 1]],
-                itertools.chain(np.ones(len(batch_pairs_pos), np.uint8),
-                                np.zeros(len(batch_pairs_neg), np.uint8))):
-            if key1 in self.f_feat and key2 in self.f_feat:
-                batch_x1.append(self.f_feat[key1][:])
-                batch_x2.append(self.f_feat[key2][:])
-                batch_y.append(y)
+        batch_x1 = self.features[batch_pairs_idx[:, 0]]
+        batch_x2 = self.features[batch_pairs_idx[:, 1]]
+        batch_y = np.hstack((np.ones(len(batch_pairs_pos), np.uint8),
+                             np.zeros(len(batch_pairs_neg), np.uint8)))
 
         return (_features_to_arrays(batch_x1, batch_x2, *self.feature_split),
-                np.asarray(batch_y))
+                batch_y)
 
     def on_epoch_end(self):
         self.epoch_count += 1
         if self.shuffle and self.epoch_count % len(self) == 0:
+            logger.debug('Shuffle the features because all pairs have been '
+                         'processed after epoch %d', self.epoch_count)
             np.random.shuffle(self.pairs_pos)
             np.random.shuffle(self.pairs_neg)
-
-    def __enter__(self):
-        self.f_feat = h5py.File(self.filename_feat, 'r')
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.f_feat.close()
 
 
 def _features_to_arrays(x1: List[np.ndarray], x2: List[np.ndarray],
