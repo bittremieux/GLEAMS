@@ -18,6 +18,7 @@ import datetime
 
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
+from airflow.utils import helpers
 import tensorflow.compat.v1 as tf
 
 from gleams import config
@@ -94,10 +95,19 @@ with DAG('gleams', default_args=default_args,
         op_kwargs={'metadata_filename': config.metadata_filename,
                    'feat_dir': config.feat_dir}
     )
+    t_combine_feat = [
+        PythonOperator(
+            task_id='combine_features',
+            python_callable=feature.combine_features,
+            op_kwargs={'metadata_filename': config.metadata_filename.replace(
+                           '.csv', f'_{suffix}.csv'),
+                       'feat_dir': config.feat_dir})
+        for suffix in ['train', 'val', 'test']
+    ]
     t_train = PythonOperator(
         task_id='train_nn',
         python_callable=nn.train_nn,
-        op_kwargs={'filename_feat': config.feat_filename,
+        op_kwargs={'feat_dir': config.feat_dir,
                    'filename_model': config.model_filename,
                    'filename_metadata_train':
                        config.metadata_filename.replace(
@@ -121,4 +131,5 @@ with DAG('gleams', default_args=default_args,
 
     t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]
     t_download >> t_enc_feat
-    [*t_pairs_pos, *t_pairs_neg, t_enc_feat] >> t_train
+    helpers.cross_downstream([t_split_feat, t_enc_feat], t_combine_feat)
+    [*t_pairs_pos, *t_pairs_neg, *t_combine_feat] >> t_train
