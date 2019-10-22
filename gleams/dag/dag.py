@@ -85,7 +85,7 @@ with DAG('gleams', default_args=default_args,
             task_id='combine_features',
             python_callable=feature.combine_features,
             op_kwargs={'metadata_filename': config.metadata_filename.replace(
-                           '.csv', f'_{suffix}.csv'),
+                           '.parquet', f'_{suffix}.parquet'),
                        'feat_dir': config.feat_dir})
         for suffix in suffixes
     }

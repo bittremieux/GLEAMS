@@ -10,7 +10,6 @@ import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 from spectrum_utils import utils as suu
 
 
@@ -56,7 +55,7 @@ def convert_massivekb_metadata(massivekb_filename: str,
         metadata = metadata[['dataset', 'filename', 'scan', 'sequence',
                              'charge', 'mz']]
         logger.debug('Save metadata file to %s', metadata_filename)
-        metadata.to_csv(metadata_filename, index=False)
+        metadata.to_parquet(metadata_filename, index=False)
 
 
 def split_metadata_train_val_test(
@@ -71,7 +70,7 @@ def split_metadata_train_val_test(
     Parameters
     ----------
     metadata_filename : str
-        The input metadata filename. It should have a .csv extension.
+        The input metadata filename. Should be a Parquet file.
     val_ratio : float
         Proportion of the total number of PSMs that should approximately be in
         the validation set. If None, no validation split will be generated.
@@ -82,7 +81,7 @@ def split_metadata_train_val_test(
         Proportion tolerance of the number of PSMs in the validation and test
         splits. Default: 0.1 * val_ratio.
     """
-    metadata = pd.read_csv(metadata_filename, index_col='dataset')
+    metadata = pd.read_parquet(metadata_filename).set_index('dataset')
     abs_tol = int((rel_tol if rel_tol is not None else
                    (0.1 * (val_ratio if val_ratio is not None else 0)))
                   * len(metadata))
@@ -96,25 +95,26 @@ def split_metadata_train_val_test(
     logger.info('Split the metadata file into train (~%.f%%), validation '
                 '(~%.f%%), and test (~%.f%%) sets', perc_train, perc_val,
                 perc_test)
-    datasets = metadata.groupby('dataset')['scan'].count().sample(frac=1)
+    datasets = (metadata.groupby('dataset', as_index=False, sort=False)['scan']
+                .count().sample(frac=1))
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
         logger.debug('Save validation metadata file to %s',
-                     metadata_filename.replace('.csv', '_val.csv'))
-        metadata.loc[selected_val].to_csv(
-            metadata_filename.replace('.csv', '_val.csv'))
+                     metadata_filename.replace('.parquet', '_val.parquet'))
+        metadata.loc[selected_val].to_parquet(
+            metadata_filename.replace('.parquet', '_val.parquet'), index=True)
         datasets = datasets.drop(selected_val)
     if num_test > 0:
         selected_test = _select_datasets(datasets, num_test, abs_tol)
         logger.debug('Save test metadata file to %s',
-                     metadata_filename.replace('.csv', '_test.csv'))
-        metadata.loc[selected_test].to_csv(
-            metadata_filename.replace('.csv', '_test.csv'))
+                     metadata_filename.replace('.parquet', '_test.parquet'))
+        metadata.loc[selected_test].to_parquet(
+            metadata_filename.replace('.parquet', '_test.parquet'), index=True)
         datasets = datasets.drop(selected_test)
     logger.debug('Save train metadata file to %s',
-                 metadata_filename.replace('.csv', '_train.csv'))
-    metadata.loc[datasets.index].to_csv(
-        metadata_filename.replace('.csv', '_train.csv'))
+                 metadata_filename.replace('.parquet', '_train.parquet'))
+    metadata.loc[datasets.index].to_parquet(
+        metadata_filename.replace('.parquet', '_train.parquet'), index=True)
 
 
 def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
@@ -210,7 +210,7 @@ def generate_pairs_positive(metadata_filename: str) -> None:
     The positive training pairs consist of all pairs with the same peptide
     sequence in the metadata. Identity pairs are included.
     Pairs of row numbers in the metadata file for each positive pair are stored
-    in CSV file `{metadata_filename}_pairs_pos.csv`.
+    in Parquet file `{metadata_filename}_pairs_pos.parquet`.
     If this file already exists it will _not_ be recreated.
 
     Parameters
@@ -222,8 +222,8 @@ def generate_pairs_positive(metadata_filename: str) -> None:
     if not os.path.isfile(pairs_filename):
         logger.info('Generate positive pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = pq.read_table(
-            metadata_filename, columns=['sequence', 'charge']).to_pandas()
+        metadata = pd.read_parquet(metadata_filename,
+                                   columns=['sequence', 'charge'])
         metadata['row_num'] = range(len(metadata.index))
         same_row_nums = metadata.groupby(
             ['sequence', 'charge'], as_index=False, sort=False)['row_num']
@@ -244,7 +244,7 @@ def generate_pairs_negative(metadata_filename: str,
     sequence and a precursor m/z difference smaller than the given m/z
     tolerance in the metadata.
     Pairs of row numbers in the metadata file for each negative pair are stored
-    in CSV file `{metadata_filename}_pairs_neg.csv`.
+    in Parquet file `{metadata_filename}_pairs_neg.parquet`.
     If this file already exists it will _not_ be recreated.
 
     Parameters
@@ -259,9 +259,8 @@ def generate_pairs_negative(metadata_filename: str,
     if not os.path.isfile(pairs_filename):
         logger.info('Generate negative pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = (pq.read_table(metadata_filename,
-                                  columns=['sequence', 'charge', 'mz'])
-                    .to_pandas())
+        metadata = pd.read_parquet(metadata_filename,
+                                   columns=['sequence', 'charge', 'mz'])
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))

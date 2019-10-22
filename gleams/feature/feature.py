@@ -80,14 +80,14 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
     Parameters
     ----------
     metadata_filename : str
-        The metadata file name.
+        The metadata file name. Should be a Parquet file.
     feat_dir : str
         Feature files will be stored in the `dataset` subdirectory of this root
         directory.
     """
-    metadata = pd.read_csv(metadata_filename,
-                           index_col=['dataset', 'filename'],
-                           dtype={'scan': str}).set_index('scan', append=True)
+    metadata = pd.read_parquet(metadata_filename)
+    metadata['scan'] = metadata['scan'].astype(str)
+    metadata = metadata.set_index(['dataset', 'filename', 'scan'])
 
     enc = encoder.MultipleEncoder([
         encoder.PrecursorEncoder(
@@ -148,11 +148,12 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
     ----------
     metadata_filename : str
         Features for all datasets included in the metadata will be combined.
+        Should be a Parquet file.
     feat_dir : str
         Root feature directory.
     """
-    datasets = pd.read_csv(metadata_filename, usecols=['dataset'],
-                           squeeze=True).unique()
+    datasets = pd.read_parquet(metadata_filename,
+                               usecols=['dataset'])['dataset'].unique()
     logger.info('Combine features for metadata file %s containing %d datasets',
                 metadata_filename, len(datasets))
     encodings, indexes = [], []

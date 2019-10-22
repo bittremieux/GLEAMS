@@ -11,7 +11,7 @@ massivekb_filename = os.path.join(
     f'candidate_library_spectra-main.tsv')
 metadata_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'metadata',
-    f'metadata_{massivekb_task_id}.csv')
+    f'metadata_{massivekb_task_id}.parquet')
 feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
 model_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'model',
