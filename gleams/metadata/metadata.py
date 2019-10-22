@@ -10,6 +10,7 @@ import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from spectrum_utils import utils as suu
 
 
@@ -215,22 +216,22 @@ def generate_pairs_positive(metadata_filename: str) -> None:
     Parameters
     ----------
     metadata_filename : str
-        The metadata file name. Should have a .csv extension.
+        The metadata file name. Should be a Parquet file.
     """
-    filename = metadata_filename.replace('.csv', '_pairs_pos.csv')
-    if not os.path.isfile(filename):
+    pairs_filename = metadata_filename.replace('.parquet', '_pairs_pos.npy')
+    if not os.path.isfile(pairs_filename):
         logger.info('Generate positive pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = pd.read_csv(metadata_filename)
+        metadata = pq.read_table(
+            metadata_filename, columns=['sequence', 'charge']).to_pandas()
         metadata['row_num'] = range(len(metadata.index))
-        same_row_nums = metadata.groupby(['sequence', 'charge'],
-                                         sort=False)['row_num']
-        logger.debug('Save positive pair indexes to %s', filename)
-        with open(filename, 'w') as f_out:
-            for p1, p2 in itertools.chain(
-                    *(same_row_nums.apply(functools.partial(
-                        itertools.combinations, r=2)))):
-                f_out.write(f'{p1},{p2}\n')
+        same_row_nums = metadata.groupby(
+            ['sequence', 'charge'], as_index=False, sort=False)['row_num']
+        logger.debug('Save positive pair indexes to %s', pairs_filename)
+        np.save(pairs_filename, np.asarray(
+            [[p1, p2] for p1, p2 in itertools.chain(*(same_row_nums.apply(
+                functools.partial(itertools.combinations, r=2))))],
+            dtype=np.uint32))
 
 
 def generate_pairs_negative(metadata_filename: str,
@@ -249,16 +250,18 @@ def generate_pairs_negative(metadata_filename: str,
     Parameters
     ----------
     metadata_filename : str
-        The metadata file name. Should have a .csv extension.
+        The metadata file name. Should be a Parquet file.
     mz_tolerance : float
         Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
         negative pair.
     """
-    filename = metadata_filename.replace('.csv', '_pairs_neg.csv')
-    if not os.path.isfile(filename):
+    pairs_filename = metadata_filename.replace('.parquet', '_pairs_neg.npy')
+    if not os.path.isfile(pairs_filename):
         logger.info('Generate negative pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = pd.read_csv(metadata_filename)
+        metadata = (pq.read_table(metadata_filename,
+                                  columns=['sequence', 'charge', 'mz'])
+                    .to_pandas())
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
@@ -266,16 +269,16 @@ def generate_pairs_negative(metadata_filename: str,
         # List because Numba can't handle object (string) arrays.
         sequences = metadata['sequence'].tolist()
         mzs = metadata['mz'].values
-        logger.debug('Save negative pair indexes to %s', filename)
+        logger.debug('Save negative pair indexes to %s', pairs_filename)
         with warnings.catch_warnings():
             # FIXME: Deprecated reflected list in Numba should be resolved from
             #        version 0.46.0 onwards.
             #  https://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
             warnings.simplefilter('ignore', nb.NumbaPendingDeprecationWarning)
-            with open(filename, 'w') as f_out:
-                for row_num1, row_num2 in _generate_pairs_negative(
-                        row_nums, sequences, mzs, mz_tolerance):
-                    f_out.write(f'{row_num1},{row_num2}\n')
+            np.save(pairs_filename, np.asarray(
+                [[p1, p2] for p1, p2 in _generate_pairs_negative(
+                    row_nums, sequences, mzs, mz_tolerance)],
+                dtype=np.uint32))
 
 
 @nb.njit

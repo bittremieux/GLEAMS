@@ -52,7 +52,7 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
         return filename, None, None
     logger.debug('Process file %s/%s', dataset, filename)
     file_scans, file_encodings = [], []
-    metadata = metadata.set_index('scan')
+    metadata = metadata.reset_index(['dataset', 'filename'], drop=True)
     for spec in ms_io.get_spectra(peak_filename):
         scan = str(spec.identifier)
         if (scan in metadata.index and
@@ -87,7 +87,7 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
     """
     metadata = pd.read_csv(metadata_filename,
                            index_col=['dataset', 'filename'],
-                           dtype={'scan': str})
+                           dtype={'scan': str}).set_index('scan', append=True)
 
     enc = encoder.MultipleEncoder([
         encoder.PrecursorEncoder(
@@ -111,7 +111,7 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
             pass
     dataset_total = len(metadata.index.unique('dataset'))
     for dataset_i, (dataset, metadata_dataset) in enumerate(
-            metadata.groupby('dataset'), 1):
+            metadata.groupby('dataset', as_index=False, sort=False), 1):
         # Group all encoded spectra per dataset.
         filename_encodings = os.path.join(
             config.feat_dir, 'dataset', f'{dataset}.npy')
@@ -121,23 +121,23 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
                 not os.path.isfile(filename_index)):
             logging.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
                          dataset_total)
-            index_filenames, index_scans, encodings = [], [], []
+            metadata_index, encodings = [], []
             for filename, file_scans, file_encodings in\
                     joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
                         joblib.delayed(_peaks_to_features)
                         (dataset, fn, md_fn, enc)
-                        for fn, md_fn in metadata_dataset.groupby('filename')):
+                        for fn, md_fn in metadata_dataset.groupby(
+                            'filename', as_index=False, sort=False)):
                 if file_scans is not None and len(file_scans) > 0:
-                    index_filenames.extend([filename] * len(file_scans))
-                    index_scans.extend(file_scans)
+                    metadata_index.extend([(dataset, filename, scan)
+                                           for scan in file_scans])
                     encodings.extend(file_encodings)
             # Store the encoded spectra in a file per dataset.
-            if len(index_filenames) > 0:
+            if len(metadata_index) > 0:
                 np.save(filename_encodings, np.vstack(encodings))
-                index_df = (pd.DataFrame({'filename': index_filenames,
-                                          'scan': index_scans}))
                 pq.write_table(pa.Table.from_pandas(
-                    index_df, preserve_index=False), filename_index)
+                    metadata.loc[metadata_index], preserve_index=True),
+                    filename_index)
 
 
 def combine_features(metadata_filename: str, feat_dir: str) -> None:

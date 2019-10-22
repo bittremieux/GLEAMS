@@ -47,9 +47,9 @@ class PairSequence(Sequence):
         """
         self.features = np.load(filename_feat)
 
-        pairs_pos = np.loadtxt(filename_pairs_pos, np.uint32, delimiter=',')
+        pairs_pos = np.load(filename_pairs_pos)
         np.random.shuffle(pairs_pos)
-        pairs_neg = np.loadtxt(filename_pairs_neg, np.uint32, delimiter=',')
+        pairs_neg = np.load(filename_pairs_neg)
         np.random.shuffle(pairs_neg)
         num_pairs = min(len(pairs_pos), len(pairs_neg))
         if max_num_pairs is not None:

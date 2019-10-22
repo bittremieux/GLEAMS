@@ -53,6 +53,8 @@ default_args = {
 
 with DAG('gleams', default_args=default_args,
          schedule_interval=datetime.timedelta(weeks=1)) as dag:
+    suffixes = ['train', 'val', 'test']
+
     t_metadata = PythonOperator(
         task_id='convert_massivekb_metadata',
         python_callable=metadata.convert_massivekb_metadata,
@@ -72,63 +74,76 @@ with DAG('gleams', default_args=default_args,
         python_callable=metadata.download_massivekb_peaks,
         op_kwargs={'massivekb_filename': config.massivekb_filename}
     )
-    t_pairs_pos = [
-        PythonOperator(
-            task_id=f'generate_pairs_positive_{suffix}',
-            python_callable=metadata.generate_pairs_positive,
-            op_kwargs={'metadata_filename': config.metadata_filename.replace(
-                '.csv', f'_{suffix}.csv')})
-        for suffix in ['train', 'val', 'test']
-    ]
-    t_pairs_neg = [
-        PythonOperator(
-            task_id=f'generate_pairs_negative_{suffix}',
-            python_callable=metadata.generate_pairs_negative,
-            op_kwargs={'metadata_filename': config.metadata_filename.replace(
-                           '.csv', f'_{suffix}.csv'),
-                       'mz_tolerance': config.pair_mz_tolerance})
-        for suffix in ['train', 'val', 'test']
-    ]
     t_enc_feat = PythonOperator(
         task_id='convert_peaks_to_features',
         python_callable=feature.convert_peaks_to_features,
         op_kwargs={'metadata_filename': config.metadata_filename,
                    'feat_dir': config.feat_dir}
     )
-    t_combine_feat = [
-        PythonOperator(
+    t_combine_feat = {
+        suffix: PythonOperator(
             task_id='combine_features',
             python_callable=feature.combine_features,
             op_kwargs={'metadata_filename': config.metadata_filename.replace(
                            '.csv', f'_{suffix}.csv'),
                        'feat_dir': config.feat_dir})
-        for suffix in ['train', 'val', 'test']
-    ]
+        for suffix in suffixes
+    }
+    t_pairs_pos = {
+        suffix: PythonOperator(
+            task_id=f'generate_pairs_positive_{suffix}',
+            python_callable=metadata.generate_pairs_positive,
+            op_kwargs={
+                'metadata_filename': os.path.join(
+                    config.feat_dir,
+                    f'feature_{config.massivekb_task_id}_{suffix}.parquet')})
+        for suffix in suffixes
+    }
+    t_pairs_neg = {
+        suffix: PythonOperator(
+            task_id=f'generate_pairs_negative_{suffix}',
+            python_callable=metadata.generate_pairs_negative,
+            op_kwargs={
+                'metadata_filename': os.path.join(
+                    config.feat_dir,
+                    f'feature_{config.massivekb_task_id}_{suffix}.parquet'),
+                'mz_tolerance': config.pair_mz_tolerance})
+        for suffix in suffixes
+    }
     t_train = PythonOperator(
         task_id='train_nn',
         python_callable=nn.train_nn,
         op_kwargs={'filename_model': config.model_filename,
                    'filename_feat_train':
-                       config.metadata_filename.replace(
-                           '.csv', '_train.npy'),
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'train.npy'),
                    'filename_train_pairs_pos':
-                       config.metadata_filename.replace(
-                           '.csv', '_train_pairs_pos.csv'),
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'train_pairs_pos.npy'),
                    'filename_train_pairs_neg':
-                       config.metadata_filename.replace(
-                           '.csv', '_train_pairs_neg.csv'),
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'train_pairs_neg.npy'),
                    'filename_feat_val':
-                       config.metadata_filename.replace(
-                           '.csv', '_val.npy'),
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'val.npy'),
                    'filename_val_pairs_pos':
-                       config.metadata_filename.replace(
-                           '.csv', '_val_pairs_pos.csv'),
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'val_pairs_pos.npy'),
                    'filename_val_pairs_neg':
-                       config.metadata_filename.replace(
-                           '.csv', '_val_pairs_neg.csv')}
+                       os.path.join(config.feat_dir,
+                                    f'feature_{config.massivekb_task_id}_'
+                                    f'val_pairs_neg.npy')}
     )
 
-    t_metadata >> t_split_feat >> [*t_pairs_pos, *t_pairs_neg]
+    t_metadata >> t_split_feat
     t_download >> t_enc_feat
     helpers.cross_downstream([t_split_feat, t_enc_feat], t_combine_feat)
-    [*t_pairs_pos, *t_pairs_neg, *t_combine_feat] >> t_train
+    for suffix in suffixes:
+        t_combine_feat[suffix] >> [t_pairs_pos[suffix], t_pairs_neg[suffix]]
+    [t_pairs_pos['train'], t_pairs_neg['train'],
+     t_pairs_pos['val'], t_pairs_neg['val']] >> t_train
