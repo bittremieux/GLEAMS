@@ -1,12 +1,11 @@
 import logging
 import os
-from typing import Iterator, Tuple
+import pickle
+from typing import List, Optional, Tuple
 
+import joblib
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams import config
 from gleams.feature import encoder, spectrum
@@ -18,12 +17,10 @@ logger = logging.getLogger('gleams')
 
 def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
                        enc: encoder.SpectrumEncoder)\
-        -> Iterator[Tuple[MsmsSpectrum, str]]:
+        -> Tuple[str, Optional[List[str]], Optional[List[np.ndarray]]]:
     """
     Convert the spectra with the given identifiers in the given file to a
     feature array.
-
-    If the feature file already exist it will _not_ be recreated.
 
     Parameters
     ----------
@@ -39,21 +36,31 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
 
     Returns
     -------
-    Iterator[Tuple[MsmsSpectrum, str]]
-        Tuples of encoded spectra and their spectrum identifier (scan number).
+    Tuple[str, Optional[List[str]], Optional[List[np.ndarray]]]
+        A tuple of length 3 containing: the name of the file that has been
+        converted, the identifiers (scan numbers) of the converted spectra, the
+        converted spectra.
+        If the given file does not contain any (valid) spectra to be converted,
+        the final two elements of the tuple are None.
     """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
     if not os.path.isfile(peak_filename):
         logger.warning('Missing peak file %s, no features generated',
                        peak_filename)
-        return
+        return filename, None, None
+    logger.debug('Process file %s/%s', dataset, filename)
+    file_scans, file_encodings = [], []
+    metadata = metadata.set_index('scan')
     for spec in ms_io.get_spectra(peak_filename):
         scan = str(spec.identifier)
         if (scan in metadata.index and
                 spectrum.preprocess(spec, config.fragment_mz_min,
                                     config.fragment_mz_max).is_valid):
-            yield enc.encode(spec), scan
+            file_scans.append(scan)
+            file_encodings.append(enc.encode(spec))
+
+    return filename, file_scans, file_encodings
 
 
 def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
@@ -105,27 +112,30 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
             metadata.groupby('dataset'), 1):
         # Group all encoded spectra per dataset.
         filename_encodings = os.path.join(config.feat_dir, f'{dataset}.npy')
-        filename_index = os.path.join(config.feat_dir, f'{dataset}.parquet')
+        filename_index = os.path.join(config.feat_dir, f'{dataset}.pkl')
         if (not os.path.isfile(filename_encodings) or
                 not os.path.isfile(filename_index)):
             logging.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
                          dataset_total)
-            index_is, index_filenames, index_scans, encodings = [], [], [], []
-            for filename, metadata_filename in metadata_dataset.groupby(
-                    'filename'):
-                logger.debug('Process file %s/%s', dataset, filename)
-                metadata_filename = metadata_filename.set_index('scan')
-                for i, (spec_enc, scan) in enumerate(_peaks_to_features(
-                        dataset, filename, metadata_filename, enc)):
-                    encodings.append(spec_enc)
-                    index_filenames.append(filename)
-                    index_scans.append(scan)
-                    index_is.append(i)
+            filename_scans, encodings = [], []
+            for filename, file_scans, file_encodings in\
+                    joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
+                        joblib.delayed(_peaks_to_features)
+                        (dataset, fn, md_fn, enc)
+                        for fn, md_fn in metadata_dataset.groupby('filename')):
+                if file_scans is not None and len(file_scans) > 0:
+                    filename_scans.append((filename, file_scans))
+                    encodings.extend(file_encodings)
             # Store the encoded spectra in a file per dataset.
-            np.save(filename_encodings, np.vstack(encodings))
-            dataset_df = (pd.DataFrame({'filename': index_filenames,
-                                        'scan': index_scans,
-                                        'index': index_is})
-                          .set_index(['filename', 'scan']))
-            pq.write_table(pa.Table.from_pandas(
-                dataset_df, preserve_index=True), filename_index)
+            if len(filename_scans) > 0:
+                index_map = {}
+                encoding_counter = 0
+                for filename, scans in filename_scans:
+                    index_map[filename] = {}
+                    filename_map = index_map[filename]
+                    for scan in scans:
+                        filename_map[scan] = encoding_counter
+                        encoding_counter += 1
+                np.save(filename_encodings, np.vstack(encodings))
+                with open(filename_index, 'wb') as f_out:
+                    pickle.dump(index_map, f_out, pickle.HIGHEST_PROTOCOL)
