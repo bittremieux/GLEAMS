@@ -165,21 +165,23 @@ def download_massive_file(massive_filename: str) -> None:
     dataset = massive_filename.split('/', 1)[0]
     dataset_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak',
                                dataset)
-    if not os.path.isdir(dataset_dir):
-        try:
-            os.makedirs(dataset_dir)
-        except OSError:
-            pass
     peak_filename = massive_filename.rsplit('/', 1)[-1]
-    logger.debug('Download file %s/%s', dataset, peak_filename)
-    url = f'ftp://massive.ucsd.edu/{massive_filename}'
-    proc = subprocess.run(
-        ['wget', '--no-verbose', '--timestamping', '--retry-connrefused',
-         f'--directory-prefix={dataset_dir}', '--passive-ftp', url],
-        capture_output=True, text=True)
-    if proc.returncode != 0:
-        logger.warning('Could not download file %s/%s: wget error %d: %s',
-                       dataset, peak_filename, proc.returncode, proc.stderr)
+    if not os.path.isfile(peak_filename):
+        if not os.path.isdir(dataset_dir):
+            try:
+                os.makedirs(dataset_dir)
+            except OSError:
+                pass
+        logger.debug('Download file %s/%s', dataset, peak_filename)
+        url = f'ftp://massive.ucsd.edu/{massive_filename}'
+        proc = subprocess.run(
+            ['wget', '--no-verbose', '--timestamping', '--retry-connrefused',
+             f'--directory-prefix={dataset_dir}', '--passive-ftp', url],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            logger.warning('Could not download file %s/%s: wget error %d: %s',
+                           dataset, peak_filename, proc.returncode,
+                           proc.stderr)
 
 
 def download_massivekb_peaks(massivekb_filename: str) -> None:
