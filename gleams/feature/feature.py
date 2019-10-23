@@ -152,8 +152,8 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
     feat_dir : str
         Root feature directory.
     """
-    datasets = pd.read_parquet(metadata_filename,
-                               usecols=['dataset'])['dataset'].unique()
+    datasets = (pd.read_parquet(metadata_filename, columns=['dataset']).index
+                .unique().values)
     logger.info('Combine features for metadata file %s containing %d datasets',
                 metadata_filename, len(datasets))
     encodings, indexes = [], []

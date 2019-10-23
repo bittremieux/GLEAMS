@@ -95,7 +95,7 @@ def split_metadata_train_val_test(
     logger.info('Split the metadata file into train (~%.f%%), validation '
                 '(~%.f%%), and test (~%.f%%) sets', perc_train, perc_val,
                 perc_test)
-    datasets = (metadata.groupby('dataset', as_index=False, sort=False)['scan']
+    datasets = (metadata.groupby('dataset', sort=False)['scan']
                 .count().sample(frac=1))
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
