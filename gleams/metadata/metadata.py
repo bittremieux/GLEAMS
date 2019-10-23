@@ -81,6 +81,13 @@ def split_metadata_train_val_test(
         Proportion tolerance of the number of PSMs in the validation and test
         splits. Default: 0.1 * val_ratio.
     """
+    filename_train = metadata_filename.replace('.parquet', '_train.parquet')
+    filename_val = metadata_filename.replace('.parquet', '_val.parquet')
+    filename_test = metadata_filename.replace('.parquet', '_test.parquet')
+    if (os.path.isfile(filename_train) and
+            (val_ratio is None or os.path.isfile(filename_val)) and
+            (test_ratio is None or os.path.isfile(filename_test))):
+        return
     metadata = pd.read_parquet(metadata_filename).set_index('dataset')
     abs_tol = int((rel_tol if rel_tol is not None else
                    (0.1 * (val_ratio if val_ratio is not None else 0)))
@@ -99,22 +106,16 @@ def split_metadata_train_val_test(
                 .count().sample(frac=1))
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
-        logger.debug('Save validation metadata file to %s',
-                     metadata_filename.replace('.parquet', '_val.parquet'))
-        metadata.loc[selected_val].to_parquet(
-            metadata_filename.replace('.parquet', '_val.parquet'), index=True)
+        logger.debug('Save validation metadata file to %s', filename_val)
+        metadata.loc[selected_val].to_parquet(filename_val, index=True)
         datasets = datasets.drop(selected_val)
     if num_test > 0:
         selected_test = _select_datasets(datasets, num_test, abs_tol)
-        logger.debug('Save test metadata file to %s',
-                     metadata_filename.replace('.parquet', '_test.parquet'))
-        metadata.loc[selected_test].to_parquet(
-            metadata_filename.replace('.parquet', '_test.parquet'), index=True)
+        logger.debug('Save test metadata file to %s', filename_test)
+        metadata.loc[selected_test].to_parquet(filename_test, index=True)
         datasets = datasets.drop(selected_test)
-    logger.debug('Save train metadata file to %s',
-                 metadata_filename.replace('.parquet', '_train.parquet'))
-    metadata.loc[datasets.index].to_parquet(
-        metadata_filename.replace('.parquet', '_train.parquet'), index=True)
+    logger.debug('Save train metadata file to %s', filename_train)
+    metadata.loc[datasets.index].to_parquet(filename_train, index=True)
 
 
 def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
