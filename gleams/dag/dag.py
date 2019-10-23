@@ -142,7 +142,8 @@ with DAG('gleams', default_args=default_args,
 
     t_metadata >> t_split_feat
     t_download >> t_enc_feat
-    helpers.cross_downstream([t_split_feat, t_enc_feat], t_combine_feat)
+    helpers.cross_downstream([t_split_feat, t_enc_feat],
+                             t_combine_feat.values())
     for suffix in suffixes:
         t_combine_feat[suffix] >> [t_pairs_pos[suffix], t_pairs_neg[suffix]]
     [t_pairs_pos['train'], t_pairs_neg['train'],
