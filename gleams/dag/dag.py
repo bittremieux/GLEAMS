@@ -40,6 +40,12 @@ except Exception as e:
 tf.logging.set_verbosity(tf.logging.ERROR)
 
 
+# Initialize logging.
+logging.basicConfig(format='{asctime} [{levelname}/{processName}] '
+                           '{module}.{funcName} : {message}',
+                    style='{', level=logging.DEBUG)
+
+
 default_args = {
     'owner': 'gleams',
     'depends_on_past': False,
