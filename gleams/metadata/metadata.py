@@ -67,6 +67,9 @@ def split_metadata_train_val_test(
     The split is based on dataset, with the ratio of the number of PSMs in each
     split approximating the given ratios.
 
+    If metadata files corresponding to the training/validation/test splits
+    already exist the splits will _not_ be recreated.
+
     Parameters
     ----------
     metadata_filename : str
