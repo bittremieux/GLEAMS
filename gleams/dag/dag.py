@@ -82,7 +82,7 @@ with DAG('gleams', default_args=default_args,
     )
     t_combine_feat = {
         suffix: PythonOperator(
-            task_id='combine_features',
+            task_id=f'combine_features_{suffix}',
             python_callable=feature.combine_features,
             op_kwargs={'metadata_filename': config.metadata_filename.replace(
                            '.parquet', f'_{suffix}.parquet'),
