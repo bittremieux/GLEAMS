@@ -144,6 +144,8 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
     """
     Combine feature files for multiple datasets into a single feature file.
 
+    If the combined feature file already exists it will _not_ be recreated.
+
     Parameters
     ----------
     metadata_filename : str
@@ -152,6 +154,11 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
     feat_dir : str
         Root feature directory.
     """
+    feat_filename = os.path.join(feat_dir, os.path.splitext(os.path.basename(
+        metadata_filename))[0].replace('metadata', 'feature'))
+    if (os.path.isfile(f'{feat_filename}.npy') and
+            os.path.isfile(f'{feat_filename}.parquet')):
+        return
     datasets = (pd.read_parquet(metadata_filename, columns=['dataset']).index
                 .unique().values)
     logger.info('Combine features for metadata file %s containing %d datasets',
@@ -172,7 +179,5 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
             dataset_table = pq.read_table(dataset_index_filename)
             indexes.append(dataset_table.add_column(0, pa.Column.from_array(
                 'dataset', pa.array([dataset] * dataset_table.num_rows))))
-    feat_filename = os.path.join(feat_dir, os.path.splitext(os.path.basename(
-        metadata_filename))[0].replace('metadata', 'feature'))
     np.save(f'{feat_filename}.npy', np.vstack(encodings))
     pq.write_table(pa.concat_tables(indexes), f'{feat_filename}.parquet')
