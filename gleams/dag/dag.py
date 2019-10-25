@@ -16,6 +16,7 @@ rndm.set_seeds()
 
 import datetime
 
+import multiprocessing_logging
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from airflow.utils import helpers
@@ -43,7 +44,9 @@ tf.logging.set_verbosity(tf.logging.ERROR)
 # Initialize logging.
 logging.basicConfig(format='{asctime} [{levelname}/{processName}] '
                            '{module}.{funcName} : {message}',
-                    style='{', level=logging.DEBUG)
+                    style='{', level=logging.DEBUG, force=True)
+logging.captureWarnings(True)
+multiprocessing_logging.install_mp_handler()
 
 
 default_args = {
