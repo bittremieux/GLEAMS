@@ -229,7 +229,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
         """
         return np.asarray([spectrum.dot(ref.mz, ref.intensity, spec.mz,
                                         spec.intensity, self.fragment_mz_tol)
-                           for ref in self.ref_spectra])
+                           for ref in self.ref_spectra], dtype=np.float32)
 
 
 class MultipleEncoder(SpectrumEncoder):
