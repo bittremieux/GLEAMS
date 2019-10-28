@@ -45,7 +45,7 @@ class PairSequence(Sequence):
             Whether to shuffle the order of the batches at the beginning of
             each epoch.
         """
-        self.features = np.load(filename_feat)
+        self.features = np.load(filename_feat, mmap_mode='r')
 
         pairs_pos = np.load(filename_pairs_pos)
         np.random.shuffle(pairs_pos)
