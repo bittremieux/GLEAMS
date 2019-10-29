@@ -54,8 +54,8 @@ class PairSequence(Sequence):
         num_pairs = min(len(pairs_pos), len(pairs_neg))
         if max_num_pairs is not None:
             num_pairs = min(num_pairs, max_num_pairs // 2)
-        logger.info('Using %d feature pairs from file %s', num_pairs,
-                    filename_feat)
+        logger.info('Using %d positive and negative feature pairs each from '
+                    'file %s', num_pairs, filename_feat)
         self.pairs_pos = pairs_pos[:num_pairs]
         self.pairs_neg = pairs_neg[:num_pairs]
 
