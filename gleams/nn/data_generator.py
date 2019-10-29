@@ -47,17 +47,17 @@ class PairSequence(Sequence):
         """
         self.features = np.load(filename_feat, mmap_mode='r')
 
-        pairs_pos = np.load(filename_pairs_pos)
-        np.random.shuffle(pairs_pos)
-        pairs_neg = np.load(filename_pairs_neg)
-        np.random.shuffle(pairs_neg)
+        pairs_pos = np.load(filename_pairs_pos, mmap_mode='r')
+        pairs_neg = np.load(filename_pairs_neg, mmap_mode='r')
         num_pairs = min(len(pairs_pos), len(pairs_neg))
         if max_num_pairs is not None:
             num_pairs = min(num_pairs, max_num_pairs // 2)
         logger.info('Using %d positive and negative feature pairs each from '
                     'file %s', num_pairs, filename_feat)
-        self.pairs_pos = pairs_pos[:num_pairs]
-        self.pairs_neg = pairs_neg[:num_pairs]
+        idx_pos = np.random.choice(pairs_pos.shape[0], num_pairs, False)
+        self.pairs_pos = pairs_pos[idx_pos, :]
+        idx_neg = np.random.choice(pairs_neg.shape[0], num_pairs, False)
+        self.pairs_neg = pairs_neg[idx_neg, :]
 
         self.batch_size = batch_size
         self.feature_split = feature_split
