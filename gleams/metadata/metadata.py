@@ -235,7 +235,8 @@ def generate_pairs_positive(metadata_filename: str) -> None:
             ['sequence', 'charge'], as_index=False, sort=False)['row_num']
         logger.debug('Save positive pair indexes to %s', pairs_filename)
         np.save(pairs_filename, np.asarray(
-            [[p1, p2] for p1, p2 in itertools.chain(*(same_row_nums.apply(
+            [[np.uint32(p1), np.uint32(p2)]
+             for p1, p2 in itertools.chain(*(same_row_nums.apply(
                 functools.partial(itertools.combinations, r=2))))],
             dtype=np.uint32))
 
@@ -280,16 +281,15 @@ def generate_pairs_negative(metadata_filename: str,
             #        version 0.46.0 onwards.
             #  https://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
             warnings.simplefilter('ignore', nb.NumbaPendingDeprecationWarning)
-            np.save(pairs_filename, np.asarray(
-                [[p1, p2] for p1, p2 in _generate_pairs_negative(
-                    row_nums, sequences, mzs, mz_tolerance)],
-                dtype=np.uint32))
+            np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
+                row_nums, sequences, mzs, mz_tolerance), np.uint32)
+                    .reshape((-1, 2)))
 
 
 @nb.njit
 def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
                              mzs: np.ndarray, mz_tolerance: float)\
-        -> Iterator[Tuple[int, int]]:
+        -> Iterator[int]:
     """
     Numba utility function to efficiently generate row numbers for negative
     pairs.
@@ -308,13 +308,15 @@ def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
 
     Returns
     -------
-    Iterator[Tuple[int, int]]
-        A generator of tuple with matching row numbers of the negative pairs.
+    Iterator[int]
+        A generator of row numbers for the negative pairs, with row numbers `i`
+        and `i + 1` forming pairs.
     """
     for i in range(len(row_nums)):
         j = i + 1
         while (j < len(mzs) and
                abs(suu.mass_diff(mzs[i], mzs[j], False)) <= mz_tolerance):
             if sequences[i] != sequences[j]:
-                yield row_nums[i], row_nums[j]
+                yield row_nums[i]
+                yield row_nums[j]
             j += 1
