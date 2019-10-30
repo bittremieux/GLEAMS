@@ -439,13 +439,14 @@ class CrocHistory(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         if self.pair_generator is not None:
-            epoch_croc_aucs = []
+            y_true, y_pred = [], []
             for batch_i in range(len(self.pair_generator)):
                 batch_x, batch_y = self.pair_generator[batch_i]
-                y_pred = self.model.predict(batch_x)
-                fpr, tpr, _ = roc_curve(batch_y, 1 - y_pred / y_pred.max())
-                # Exponential CROC transformation from Swamidass et al. 2010.
-                croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
-                            (1 - np.exp(-self.alpha)))
-                epoch_croc_aucs.append(auc(croc_fpr, tpr))
-            logs['croc_auc'] = np.mean(epoch_croc_aucs)
+                y_true.append(batch_y)
+                y_pred.append(self.model.predict(batch_x).reshape(-1))
+            y_true, y_pred = np.hstack(y_true), np.hstack(y_pred)
+            fpr, tpr, _ = roc_curve(y_true, 1 - y_pred / y_pred.max())
+            # Exponential CROC transformation from Swamidass et al. 2010.
+            croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
+                        (1 - np.exp(-self.alpha)))
+            logs['aucroc'] = auc(croc_fpr, tpr)
