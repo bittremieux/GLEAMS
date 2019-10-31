@@ -1,8 +1,6 @@
 import logging
 import os
 
-from keras.utils import multi_gpu_utils
-
 from gleams import config
 from gleams.nn import data_generator, embedder
 
@@ -38,26 +36,22 @@ def train_nn(filename_model: str, filename_feat_train: str,
     model_dir = os.path.dirname(filename_model)
     if not os.path.isdir(model_dir):
         os.makedirs(model_dir)
-    logger.info('Compile the GLEAMS siamese neural network')
+    logger.info('Compile the GLEAMS neural network')
     emb = embedder.Embedder(
         config.num_precursor_features, config.num_fragment_features,
         config.num_ref_spectra, config.lr, filename_model)
-    emb.build_siamese_model()
+    emb.build()
 
     # Train the embedder.
-    logger.info('Train the GLEAMS siamese neural network')
+    logger.info('Train the GLEAMS neural network')
     feature_split =\
         (config.num_precursor_features,
          config.num_precursor_features + config.num_fragment_features)
     # Choose appropriate hyperparameters based on the number of GPUs that are
     # being used.
-    available_devices = [
-        multi_gpu_utils._normalize_device_name(name)
-        for name in multi_gpu_utils._get_available_devices()]
-    num_gpus = len([x for x in available_devices if '/gpu' in x])
+    num_gpus = embedder._get_num_gpus()
     if num_gpus == 0:
-        raise RuntimeError(f'No GPU found (available devices: '
-                           f'{", ".join(available_devices)})')
+        raise RuntimeError('No GPU found')
     batch_size = config.batch_size * num_gpus
     steps_per_epoch = config.steps_per_epoch // num_gpus
     if num_gpus > 1:
@@ -74,7 +68,7 @@ def train_nn(filename_model: str, filename_feat_train: str,
     emb.train(train_generator, steps_per_epoch, config.num_epochs,
               val_generator)
 
-    logger.info('Save the trained GLEAMS siamese neural network')
+    logger.info('Save the trained GLEAMS neural network')
     emb.save()
 
     logger.info('Training completed')

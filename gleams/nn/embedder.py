@@ -1,10 +1,10 @@
 import logging
 import os
-import warnings
 from typing import List
 
 import keras
 import numpy as np
+import tensorflow as tf
 from keras import backend as K
 from keras import Input
 from keras.callbacks import CSVLogger, TensorBoard
@@ -20,6 +20,20 @@ from gleams.nn import data_generator
 
 
 logger = logging.getLogger('gleams')
+
+
+def _get_num_gpus() -> int:
+    """
+    Get the number of GPUs that are available.
+
+    Returns
+    -------
+    int
+        The number of GPUs that are available.
+    """
+    available_devices = [multi_gpu_utils._normalize_device_name(name)
+                         for name in multi_gpu_utils._get_available_devices()]
+    return len([x for x in available_devices if '/gpu' in x])
 
 
 def euclidean_distance(vects):
@@ -118,70 +132,46 @@ class Embedder:
 
         self.siamese_model = self.siamese_model_parallel = None
 
-    def _get_base_model(self) -> Model:
+    def _get_embedder_model(self, multi_gpu: bool = False) -> Model:
         """
         Get the base embedder model (i.e. a single arm of the Siamese model).
+
+        Parameters
+        ----------
+        multi_gpu : bool
+            Specify whether the embedder should use multiple GPUs (if enabled)
+            or not.
 
         Returns
         -------
         Model
             The embedder model.
         """
-        if self.siamese_model_parallel is None:
-            raise ValueError("The Siamese model hasn't been compiled yet")
+        model = (self.siamese_model_parallel if multi_gpu else
+                 self.siamese_model)
+        if model is None:
+            raise ValueError("The embedder model hasn't been constructed yet")
         else:
-            return self.siamese_model_parallel.get_layer('base_model')
-
-    def _init_multi_gpu(self) -> Model:
-        """
-        Replicate the Siamese model over multiple GPUs if possible.
-
-        If multiple GPUs are used the learning rate is multiplied accordingly.
-
-        Returns
-        -------
-        Model
-            The multi-GPU version of the Siamese model.
-        """
-        if self.siamese_model is None:
-            raise ValueError("The Siamese model hasn't been compiled yet")
-        else:
-            # Use multiple GPUs if available.
-            try:
-                available_devices = [
-                    multi_gpu_utils._normalize_device_name(name)
-                    for name in multi_gpu_utils._get_available_devices()]
-                num_gpus = len([x for x in available_devices if '/gpu' in x])
-                model = multi_gpu_utils.multi_gpu_model(self.siamese_model,
-                                                        gpus=num_gpus,
-                                                        cpu_relocation=True)
-                logger.info('Parallelizing the Siamese model over %d GPUs',
-                            num_gpus)
-            except ValueError:
-                model = self.siamese_model
-                logger.info('Running the Siamese model on a single GPU')
-            return model
+            return model.get_layer('embedder')
 
     def save(self) -> None:
         """
-        Save the Siamese model and its training status.
+        Save the embedder model's weights.
         """
         if self.siamese_model is None:
-            raise ValueError("The Siamese model hasn't been compiled yet")
+            raise ValueError("The embedder model hasn't been constructed yet")
         else:
-            self.siamese_model.save(self.filename)
+            self._get_embedder_model().save_weights(self.filename)
 
     def load(self) -> None:
         """
-        Load the saved Siamese model and its training status from the given
-        file.
+        Create the Siamese model and set previously stored weights for its
+        embedder model.
         """
-        self.siamese_model = keras.models.load_model(
-            self.filename,
-            custom_objects={'contrastive_loss': contrastive_loss})
-        self.siamese_model_parallel = self._init_multi_gpu()
+        self.build()
+        self._get_embedder_model().load_weights(self.filename)
 
-    def _build_base_model(self) -> Model:
+    def _build_embedder_model(self) -> Model:
         """
         Construct the embedder model (i.e. a single arm of the Siamese model).
 
@@ -257,19 +247,21 @@ class Embedder:
 
         return Model(inputs=[precursor_input, fragment_input,
                              ref_spectra_input],
-                     outputs=[output_layer], name='base_model')
+                     outputs=[output_layer], name='embedder')
 
-    def build_siamese_model(self) -> None:
+    def _build_siamese_model(self) -> Model:
         """
-        Build the Siamese model and compile it to optimize the contrastive loss
-        using Adam.
+        Construct the Siamese model.
 
-        Both arms of the Siamese network will use the same base model, i.e.
-        the weights are tied between both arms.
+        The Siamese model consists of two instances of the embedder model whose
+        weights are tied.
+
+        Returns
+        -------
+        Model
+            The Siamese model.
         """
-        # Both arms of the Siamese network use the same model,
-        # i.e. the weights are tied.
-        base_model = self._build_base_model()
+        embedder_model = self._build_embedder_model()
         input_left = [Input((self.num_precursor_features,),
                             name='input_precursor_left'),
                       Input((self.num_fragment_features,),
@@ -282,18 +274,45 @@ class Embedder:
                              name='input_fragment_right'),
                        Input((self.num_ref_spectra_features,),
                              name='input_ref_spectra_right')]
-        output_left = base_model(input_left)
-        output_right = base_model(input_right)
+        output_left = embedder_model(input_left)
+        output_right = embedder_model(input_right)
 
         # Euclidean distance between two embeddings.
         distance = (Lambda(euclidean_distance, eucl_dist_output_shape,
                            name='embedding_euclidean_distance')
                     ([output_left, output_right]))
 
+        return Model(inputs=[*input_left, *input_right], outputs=distance,
+                     name='siamese_model')
+
+    def build(self) -> None:
+        """
+        Build the Siamese model and compile it to optimize the contrastive loss
+        using Adam.
+
+        Both arms of the Siamese network will use the same embedder model, i.e.
+        the weights are tied between both arms.
+
+        The model will be parallelized over all available GPUs is applicable.
+        """
+        # Both arms of the Siamese network use the same model,
+        # i.e. the weights are tied.
+        try:
+            # The shared weights should be stored on the CPU for easy sharing
+            # between multiple GPUs.
+            # FIXME: https://github.com/keras-team/keras/issues/11313
+            with tf.device('/cpu:0'):
+                self.siamese_model = self._build_siamese_model()
+            num_gpus = _get_num_gpus()
+            self.siamese_model_parallel = multi_gpu_utils.multi_gpu_model(
+                self.siamese_model, gpus=num_gpus)
+            logger.info('Parallelizing the embedder model over %d GPUs',
+                        num_gpus)
+        except ValueError:
+            self.siamese_model = self._build_siamese_model()
+            self.siamese_model_parallel = self.siamese_model
+            logger.info('Running the embedder model on a single GPU')
         # Train using Adam to optimize the contrastive loss.
-        self.siamese_model = Model(inputs=[*input_left, *input_right],
-                                   outputs=distance, name='siamese_model')
-        self.siamese_model_parallel = self._init_multi_gpu()
         self.siamese_model_parallel.compile(Adam(self.lr), contrastive_loss)
 
     def train(self, train_generator: data_generator.PairSequence,
@@ -315,14 +334,14 @@ class Embedder:
             The validation data generator.
         """
         if self.siamese_model_parallel is None:
-            raise ValueError("The Siamese model hasn't been compiled yet")
+            raise ValueError("The Siamese model hasn't been constructed yet")
 
         filename, ext = os.path.splitext(self.filename)
         filename_log = f'{filename}.log'
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
-        callbacks = [ModelCheckpointMultiGpuCompatible(
-            self.siamese_model, filename + '.epoch{epoch:03d}' + ext),
+        callbacks = [EmbedderWeightsSaver(
+                        self, filename + '.epoch{epoch:03d}' + ext),
                      CrocHistory(val_generator, filename_log),
                      CSVLogger(filename_log),
                      TensorBoard('/tmp/gleams', update_freq='batch')]
@@ -347,80 +366,25 @@ class Embedder:
         np.ndarray
             The embeddings of the given samples.
         """
-        return self._get_base_model().predict(x)
+        return self._get_embedder_model(True).predict(x)
 
 
-class ModelCheckpointMultiGpuCompatible(keras.callbacks.Callback):
+class EmbedderWeightsSaver(keras.callbacks.Callback):
+    """
+    Custom callback to save the embedder model's weights because Keras doesn't
+    play nice with checkpointing models running on multiple GPUs.
+    FIXME: https://github.com/keras-team/keras/issues/8123
+    """
 
-    def __init__(self, model, filepath, monitor='val_loss', verbose=0,
-                 save_best_only=False, save_weights_only=False,
-                 mode='auto', period=1):
+    def __init__(self, embedder: Embedder, filepath: str):
         super().__init__()
-        self.model_to_save = model
-        self.monitor = monitor
-        self.verbose = verbose
+
+        self.embedder = embedder
         self.filepath = filepath
-        self.save_best_only = save_best_only
-        self.save_weights_only = save_weights_only
-        self.period = period
-        self.epochs_since_last_save = 0
-
-        if mode not in ['auto', 'min', 'max']:
-            warnings.warn('ModelCheckpoint mode %s is unknown, fallback to '
-                          'auto mode.' % mode, RuntimeWarning)
-            mode = 'auto'
-
-        if mode == 'min':
-            self.monitor_op = np.less
-            self.best = np.Inf
-        elif mode == 'max':
-            self.monitor_op = np.greater
-            self.best = -np.Inf
-        else:
-            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
-                self.monitor_op = np.greater
-                self.best = -np.Inf
-            else:
-                self.monitor_op = np.less
-                self.best = np.Inf
 
     def on_epoch_end(self, epoch, logs=None):
-        logs = logs or {}
-        self.epochs_since_last_save += 1
-        if self.epochs_since_last_save >= self.period:
-            self.epochs_since_last_save = 0
-            filepath = self.filepath.format(epoch=epoch + 1, **logs)
-            if self.save_best_only:
-                current = logs.get(self.monitor)
-                if current is None:
-                    warnings.warn('Can save best model only with %s available,'
-                                  ' skipping.' % self.monitor, RuntimeWarning)
-                else:
-                    if self.monitor_op(current, self.best):
-                        if self.verbose > 0:
-                            print('\nEpoch %05d: %s improved from %0.5f to '
-                                  '%0.5f, saving model to %s'
-                                  % (epoch + 1, self.monitor, self.best,
-                                     current, filepath))
-                        self.best = current
-                        if self.save_weights_only:
-                            self.model_to_save.save_weights(filepath,
-                                                            overwrite=True)
-                        else:
-                            self.model_to_save.save(filepath, overwrite=True)
-                    else:
-                        if self.verbose > 0:
-                            print('\nEpoch %05d: %s did not improve from '
-                                  '%0.5f' % (epoch + 1, self.monitor,
-                                             self.best))
-            else:
-                if self.verbose > 0:
-                    print('\nEpoch %05d: saving model to %s'
-                          % (epoch + 1, filepath))
-                if self.save_weights_only:
-                    self.model_to_save.save_weights(filepath, overwrite=True)
-                else:
-                    self.model_to_save.save(filepath, overwrite=True)
+        self.embedder._get_embedder_model().save_weights(
+            self.filepath.format(epoch=epoch + 1))
 
 
 class CrocHistory(keras.callbacks.Callback):
