@@ -102,7 +102,8 @@ class PairSequence(Sequence):
         batch_y = np.hstack((np.ones(len(batch_pairs_pos), np.uint8),
                              np.zeros(len(batch_pairs_neg), np.uint8)))
 
-        return (_features_to_arrays(batch_x1, batch_x2, *self.feature_split),
+        return ([*_split_features_to_input(batch_x1, *self.feature_split),
+                 *_split_features_to_input(batch_x2, *self.feature_split)],
                 batch_y)
 
     def on_epoch_end(self):
@@ -114,18 +115,16 @@ class PairSequence(Sequence):
             np.random.shuffle(self.pairs_neg)
 
 
-def _features_to_arrays(x1: List[np.ndarray], x2: List[np.ndarray],
-                        idx1: int, idx2: int) -> List[np.ndarray]:
+def _split_features_to_input(x: List[np.ndarray], idx1: int, idx2: int)\
+        -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert individual features to arrays corresponding to the three inputs for
     the neural network.
 
     Parameters
     ----------
-    x1 : List[np.ndarray]
-        List of left feature arrays.
-    x2 : List[np.ndarray]
-        List of right feature arrays.
+    x : List[np.ndarray]
+        List of feature arrays.
     idx1 : int
         First index to split the feature arrays.
     idx2 : int
@@ -133,11 +132,9 @@ def _features_to_arrays(x1: List[np.ndarray], x2: List[np.ndarray],
 
     Returns
     -------
-    List[np.ndarray]
-        A list of six arrays: both the left and right features are split in
-        three arrays according to the two split indexes.
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        The features are split in three arrays according to the two split
+        indexes.
     """
-    x1 = np.asarray(x1)
-    x2 = np.asarray(x2)
-    return [x1[:, :idx1], x1[:, idx1:idx2], x1[:, idx2:],
-            x2[:, :idx1], x2[:, idx1:idx2], x2[:, idx2:]]
+    x = np.asarray(x)
+    return x[:, :idx1], x[:, idx1:idx2], x[:, idx2:]

@@ -1,11 +1,23 @@
 import logging
 import os
 
+import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from gleams import config
+from gleams.feature import encoder, spectrum
+from gleams.ms_io import ms_io
 from gleams.nn import data_generator, embedder
 
 
 logger = logging.getLogger('gleams')
+
+
+def _get_feature_split():
+    return (config.num_precursor_features,
+            config.num_precursor_features + config.num_fragment_features)
 
 
 def train_nn(filename_model: str, filename_feat_train: str,
@@ -44,9 +56,6 @@ def train_nn(filename_model: str, filename_feat_train: str,
 
     # Train the embedder.
     logger.info('Train the GLEAMS neural network')
-    feature_split =\
-        (config.num_precursor_features,
-         config.num_precursor_features + config.num_fragment_features)
     # Choose appropriate hyperparameters based on the number of GPUs that are
     # being used.
     num_gpus = embedder._get_num_gpus()
@@ -60,11 +69,11 @@ def train_nn(filename_model: str, filename_feat_train: str,
                     num_gpus)
     train_generator = data_generator.PairSequence(
         filename_feat_train, filename_train_pairs_pos,
-        filename_train_pairs_neg, batch_size, feature_split,
+        filename_train_pairs_neg, batch_size, _get_feature_split(),
         config.max_num_pairs_train)
     val_generator = data_generator.PairSequence(
         filename_feat_val, filename_val_pairs_pos, filename_val_pairs_neg,
-        batch_size, feature_split, config.max_num_pairs_val, False)
+        batch_size, _get_feature_split(), config.max_num_pairs_val, False)
     emb.train(train_generator, steps_per_epoch, config.num_epochs,
               val_generator)
 
@@ -72,3 +81,78 @@ def train_nn(filename_model: str, filename_feat_train: str,
     emb.save()
 
     logger.info('Training completed')
+
+
+def embed(filename_model: str) -> None:
+    """
+    Embed all spectra in the peak directory using the given GLEAMS model.
+
+    Parameters
+    ----------
+    filename_model : str
+        The GLEAMS model filename.
+    """
+    peak_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak')
+    embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed',
+                             'dataset')
+    if not os.path.isdir(embed_dir):
+        os.makedirs(embed_dir)
+
+    enc = encoder.MultipleEncoder([
+        encoder.PrecursorEncoder(
+            config.num_bits_precursor_mz, config.precursor_mz_min,
+            config.precursor_mz_max, config.num_bits_precursor_mass,
+            config.precursor_mass_min, config.precursor_mass_max,
+            config.precursor_charge_max),
+        encoder.FragmentEncoder(
+            config.fragment_mz_min, config.fragment_mz_max, config.bin_size),
+        encoder.ReferenceSpectraEncoder(
+            config.ref_spectra_filename, config.fragment_mz_min,
+            config.fragment_mz_max, config.fragment_mz_tol,
+            config.num_ref_spectra)
+    ])
+
+    logger.debug('Load the stored GLEAMS neural network')
+    emb = embedder.Embedder(
+        config.num_precursor_features, config.num_fragment_features,
+        config.num_ref_spectra, config.lr, filename_model)
+    emb.load()
+    num_gpus = embedder._get_num_gpus()
+    if num_gpus == 0:
+        raise RuntimeError('No GPU found')
+    batch_size = config.batch_size * num_gpus
+
+    logger.info('Embed all spectra in directory %s', peak_dir)
+    datasets = os.listdir(peak_dir)
+    for dataset_i, dataset in enumerate(datasets, 1):
+        filename_embedding = os.path.join(embed_dir, f'{dataset}.parquet')
+        filename_metadata = os.path.join(embed_dir, f'{dataset}.parquet')
+        if (os.path.isfile(filename_embedding) and
+                os.path.isfile(filename_metadata)):
+            continue
+        logger.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
+                    len(datasets))
+        encodings, metadata = [], {'filename': [], 'scan': []}
+        for filename in os.listdir(os.path.join(peak_dir, dataset)):
+            try:    # Unknown files will raise a ValueError.
+                logger.debug('Read and encode the spectra from file %s/%s',
+                             dataset, filename)
+                for spec in ms_io.get_spectra(os.path.join(
+                        peak_dir, dataset, filename)):
+                    if spectrum.preprocess(spec, config.fragment_mz_min,
+                                           config.fragment_mz_max).is_valid:
+                        encodings.append(enc.encode(spec))
+                        metadata['filename'].append(filename)
+                        metadata['scan'].append(spec.identifier)
+            except ValueError:
+                pass
+        if len(encodings) > 0:
+            metadata['dataset'] = [dataset] * len(metadata['scan'])
+            logger.debug('Embed the spectrum encodings')
+            embeddings = emb.embed(
+                list(data_generator._split_features_to_input(
+                    encodings, *_get_feature_split())), batch_size)
+            logger.debug('Save the embeddings')
+            np.save(filename_embedding, np.vstack(embeddings))
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(metadata)),
+                           filename_metadata)
