@@ -64,7 +64,7 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
     return filename, file_scans, file_encodings
 
 
-def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
+def convert_peaks_to_features(metadata_filename: str)\
         -> None:
     """
     Convert all peak files listed in the given metadata file to features.
@@ -81,9 +81,6 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
     ----------
     metadata_filename : str
         The metadata file name. Should be a Parquet file.
-    feat_dir : str
-        Feature files will be stored in the `dataset` subdirectory of this root
-        directory.
     """
     metadata = pd.read_parquet(metadata_filename)
     metadata['scan'] = metadata['scan'].astype(str)
@@ -104,19 +101,22 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
     ])
 
     logger.info('Convert peak files for metadata file %s', metadata_filename)
-    if not os.path.isdir(os.path.join(feat_dir, 'dataset')):
+    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature',
+                            'dataset')
+    if not os.path.isdir(feat_dir):
         try:
-            os.makedirs(os.path.join(feat_dir, 'dataset'))
+            os.makedirs(os.path.join(feat_dir))
         except OSError:
             pass
     dataset_total = len(metadata.index.unique('dataset'))
     for dataset_i, (dataset, metadata_dataset) in enumerate(
             metadata.groupby('dataset', as_index=False, sort=False), 1):
         # Group all encoded spectra per dataset.
+        feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
         filename_encodings = os.path.join(
-            config.feat_dir, 'dataset', f'{dataset}.npy')
+            feat_dir, 'dataset', f'{dataset}.npy')
         filename_index = os.path.join(
-            config.feat_dir, 'dataset', f'{dataset}.parquet')
+            feat_dir, 'dataset', f'{dataset}.parquet')
         if (not os.path.isfile(filename_encodings) or
                 not os.path.isfile(filename_index)):
             logging.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
@@ -140,7 +140,7 @@ def convert_peaks_to_features(metadata_filename: str, feat_dir: str)\
                     filename_index)
 
 
-def combine_features(metadata_filename: str, feat_dir: str) -> None:
+def combine_features(metadata_filename: str) -> None:
     """
     Combine feature files for multiple datasets into a single feature file.
 
@@ -151,11 +151,10 @@ def combine_features(metadata_filename: str, feat_dir: str) -> None:
     metadata_filename : str
         Features for all datasets included in the metadata will be combined.
         Should be a Parquet file.
-    feat_dir : str
-        Root feature directory.
     """
-    feat_filename = os.path.join(feat_dir, os.path.splitext(os.path.basename(
-        metadata_filename))[0].replace('metadata', 'feature'))
+    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
+    feat_filename = os.path.join(feat_dir, os.path.splitext(
+        os.path.basename(metadata_filename))[0].replace('metadata', 'feature'))
     if (os.path.isfile(f'{feat_filename}.npy') and
             os.path.isfile(f'{feat_filename}.parquet')):
         return

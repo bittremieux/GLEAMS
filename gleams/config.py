@@ -12,7 +12,6 @@ massivekb_filename = os.path.join(
 metadata_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'metadata',
     f'metadata_{massivekb_task_id}.parquet')
-feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
 model_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'model',
     f'gleams_{massivekb_task_id}.hdf5')

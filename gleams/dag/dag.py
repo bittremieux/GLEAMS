@@ -64,6 +64,8 @@ with DAG('gleams', default_args=default_args,
          schedule_interval=datetime.timedelta(weeks=1)) as dag:
     suffixes = ['train', 'val', 'test']
 
+    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
+
     t_metadata = PythonOperator(
         task_id='convert_massivekb_metadata',
         python_callable=metadata.convert_massivekb_metadata,
@@ -86,16 +88,14 @@ with DAG('gleams', default_args=default_args,
     t_enc_feat = PythonOperator(
         task_id='convert_peaks_to_features',
         python_callable=feature.convert_peaks_to_features,
-        op_kwargs={'metadata_filename': config.metadata_filename,
-                   'feat_dir': config.feat_dir}
+        op_kwargs={'metadata_filename': config.metadata_filename}
     )
     t_combine_feat = {
         suffix: PythonOperator(
             task_id=f'combine_features_{suffix}',
             python_callable=feature.combine_features,
             op_kwargs={'metadata_filename': config.metadata_filename.replace(
-                           '.parquet', f'_{suffix}.parquet'),
-                       'feat_dir': config.feat_dir})
+                           '.parquet', f'_{suffix}.parquet')})
         for suffix in suffixes
     }
     t_pairs_pos = {
@@ -104,7 +104,7 @@ with DAG('gleams', default_args=default_args,
             python_callable=metadata.generate_pairs_positive,
             op_kwargs={
                 'metadata_filename': os.path.join(
-                    config.feat_dir,
+                    feat_dir,
                     f'feature_{config.massivekb_task_id}_{suffix}.parquet')})
         for suffix in suffixes
     }
@@ -114,7 +114,7 @@ with DAG('gleams', default_args=default_args,
             python_callable=metadata.generate_pairs_negative,
             op_kwargs={
                 'metadata_filename': os.path.join(
-                    config.feat_dir,
+                    feat_dir,
                     f'feature_{config.massivekb_task_id}_{suffix}.parquet'),
                 'mz_tolerance': config.pair_mz_tolerance})
         for suffix in suffixes
@@ -124,27 +124,27 @@ with DAG('gleams', default_args=default_args,
         python_callable=nn.train_nn,
         op_kwargs={'filename_model': config.model_filename,
                    'filename_feat_train':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'train.npy'),
                    'filename_train_pairs_pos':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'train_pairs_pos.npy'),
                    'filename_train_pairs_neg':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'train_pairs_neg.npy'),
                    'filename_feat_val':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'val.npy'),
                    'filename_val_pairs_pos':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'val_pairs_pos.npy'),
                    'filename_val_pairs_neg':
-                       os.path.join(config.feat_dir,
+                       os.path.join(feat_dir,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'val_pairs_neg.npy')}
     )
