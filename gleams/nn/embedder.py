@@ -366,7 +366,7 @@ class Embedder:
         np.ndarray
             The embeddings of the given samples.
         """
-        return self._get_embedder_model(True).predict(x)
+        return self._get_embedder_model(True).predict(x, config.batch_size)
 
 
 class EmbedderWeightsSaver(keras.callbacks.Callback):
