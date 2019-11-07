@@ -127,27 +127,27 @@ def embed(metadata_filename: str, model_filename: str) -> None:
         raise RuntimeError('No GPU found')
     batch_size = config.batch_size * num_gpus
 
-    logger.info('Embed all spectra in directory %s', peak_dir)
+    logger.info('Embed all peak files for metadata file %s', metadata_filename)
     dataset_total = metadata['dataset'].nunique()
     for dataset_i, (dataset, peak_filenames) in enumerate(
             metadata.groupby('dataset', sort=False)['filename'], 1):
-        metadata_filename = os.path.join(embed_dir, f'{dataset}.parquet')
+        filename_scans = os.path.join(embed_dir, f'{dataset}.parquet')
         filename_embedding = os.path.join(embed_dir, f'{dataset}.npy')
-        if (os.path.isfile(metadata_filename) and
+        if (os.path.isfile(filename_scans) and
                 os.path.isfile(filename_embedding)):
             continue
         logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
                     dataset_i, dataset_total, len(peak_filenames))
-        encodings, metadata = [], []
+        scans, encodings = [], []
         for filename, file_scans, file_encodings in joblib.Parallel(n_jobs=-1)(
                 joblib.delayed(feature._peaks_to_features)
                 (dataset, filename, None, enc) for filename in peak_filenames):
             if file_scans is not None and len(file_scans) > 0:
-                metadata.extend([(filename, scan) for scan in file_scans])
+                scans.extend([(filename, scan) for scan in file_scans])
                 encodings.extend(file_encodings)
-        if len(metadata) > 0:
+        if len(scans) > 0:
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
-                metadata, columns=['filename', 'scan'])), metadata_filename)
+                scans, columns=['filename', 'scan'])), filename_scans)
             logger.debug('Embed the spectrum encodings')
             embeddings = emb.embed(
                 list(data_generator._split_features_to_input(
