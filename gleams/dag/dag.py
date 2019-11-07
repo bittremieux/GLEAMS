@@ -151,7 +151,8 @@ with DAG('gleams', default_args=default_args,
     t_embed = PythonOperator(
         task_id='embed',
         python_callable=nn.embed,
-        op_kwargs={'filename_model': config.model_filename}
+        op_kwargs={'metadata_filename': config.metadata_filename,
+                   'model_filename': config.model_filename}
     )
 
     t_metadata >> t_split_feat

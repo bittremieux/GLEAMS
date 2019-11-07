@@ -83,13 +83,15 @@ def train_nn(filename_model: str, filename_feat_train: str,
     logger.info('Training completed')
 
 
-def embed(filename_model: str) -> None:
+def embed(metadata_filename: str, model_filename: str) -> None:
     """
     Embed all spectra in the peak directory using the given GLEAMS model.
 
     Parameters
     ----------
-    filename_model : str
+    metadata_filename : str
+        Metadata file with references to all datasets that should be embedded.
+    model_filename : str
         The GLEAMS model filename.
     """
     peak_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak')
@@ -97,6 +99,9 @@ def embed(filename_model: str) -> None:
                              'dataset')
     if not os.path.isdir(embed_dir):
         os.makedirs(embed_dir)
+
+    metadata = pd.read_parquet(
+        metadata_filename, columns=['dataset', 'filename']).drop_duplicates()
 
     enc = encoder.MultipleEncoder([
         encoder.PrecursorEncoder(
@@ -115,7 +120,7 @@ def embed(filename_model: str) -> None:
     logger.debug('Load the stored GLEAMS neural network')
     emb = embedder.Embedder(
         config.num_precursor_features, config.num_fragment_features,
-        config.num_ref_spectra, config.lr, filename_model)
+        config.num_ref_spectra, config.lr, model_filename)
     emb.load()
     num_gpus = embedder._get_num_gpus()
     if num_gpus == 0:
@@ -123,20 +128,20 @@ def embed(filename_model: str) -> None:
     batch_size = config.batch_size * num_gpus
 
     logger.info('Embed all spectra in directory %s', peak_dir)
-    datasets = os.listdir(peak_dir)
-    for dataset_i, dataset in enumerate(datasets, 1):
-        filename_metadata = os.path.join(embed_dir, f'{dataset}.parquet')
+    dataset_total = metadata['dataset'].nunique()
+    for dataset_i, (dataset, peak_filenames) in enumerate(
+            metadata.groupby('dataset', sort=False)['filename'], 1):
+        metadata_filename = os.path.join(embed_dir, f'{dataset}.parquet')
         filename_embedding = os.path.join(embed_dir, f'{dataset}.npy')
-        if (os.path.isfile(filename_metadata) and
+        if (os.path.isfile(metadata_filename) and
                 os.path.isfile(filename_embedding)):
             continue
-        filenames = os.listdir(os.path.join(peak_dir, dataset))
         logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
-                    dataset_i, len(datasets), len(filenames))
+                    dataset_i, dataset_total, len(peak_filenames))
         encodings, metadata = [], []
         for filename, file_scans, file_encodings in joblib.Parallel(n_jobs=-1)(
                 joblib.delayed(feature._peaks_to_features)
-                (dataset, filename, None, enc) for filename in filenames):
+                (dataset, filename, None, enc) for filename in peak_filenames):
             if file_scans is not None and len(file_scans) > 0:
                 metadata.extend([(dataset, filename, scan)
                                  for scan in file_scans])
@@ -144,7 +149,7 @@ def embed(filename_model: str) -> None:
         if len(metadata) > 0:
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
                 metadata, columns=['dataset', 'filename', 'scan'])),
-                filename_metadata)
+                metadata_filename)
             logger.debug('Embed the spectrum encodings')
             embeddings = emb.embed(
                 list(data_generator._split_features_to_input(
