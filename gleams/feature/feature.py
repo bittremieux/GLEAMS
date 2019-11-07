@@ -16,7 +16,8 @@ from gleams.ms_io import ms_io
 logger = logging.getLogger('gleams')
 
 
-def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
+def _peaks_to_features(dataset: str, filename: str,
+                       metadata: Optional[pd.DataFrame],
                        enc: encoder.SpectrumEncoder)\
         -> Tuple[str, Optional[List[str]], Optional[List[np.ndarray]]]:
     """
@@ -29,9 +30,10 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
         The peak file's dataset.
     filename : str
         The peak file name.
-    metadata : pd.DataFrame
+    metadata : Optional[pd.DataFrame]
         DataFrame containing metadata for the PSMs in the peak file to be
-        processed.
+        processed. If None, all spectra in the peak file are converted to
+        features.
     enc : encoder.SpectrumEncoder
         The SpectrumEncoder used to convert spectra to features.
 
@@ -41,8 +43,8 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
         A tuple of length 3 containing: the name of the file that has been
         converted, the identifiers (scan numbers) of the converted spectra, the
         converted spectra.
-        If the given file does not contain any (valid) spectra to be converted,
-        the final two elements of the tuple are None.
+        If the given file does not exist the final two elements of the tuple
+        are None.
     """
     peak_filename = os.path.join(
         os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
@@ -52,10 +54,11 @@ def _peaks_to_features(dataset: str, filename: str, metadata: pd.DataFrame,
         return filename, None, None
     logger.debug('Process file %s/%s', dataset, filename)
     file_scans, file_encodings = [], []
-    metadata = metadata.reset_index(['dataset', 'filename'], drop=True)
+    if metadata is not None:
+        metadata = metadata.reset_index(['dataset', 'filename'], drop=True)
     for spec in ms_io.get_spectra(peak_filename):
         scan = str(spec.identifier)
-        if (scan in metadata.index and
+        if ((metadata is None or scan in metadata.index) and
                 spectrum.preprocess(spec, config.fragment_mz_min,
                                     config.fragment_mz_max).is_valid):
             file_scans.append(scan)

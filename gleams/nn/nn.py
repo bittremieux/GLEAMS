@@ -1,14 +1,14 @@
 import logging
 import os
 
+import joblib
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from gleams import config
-from gleams.feature import encoder, spectrum
-from gleams.ms_io import ms_io
+from gleams.feature import encoder, feature
 from gleams.nn import data_generator, embedder
 
 
@@ -125,34 +125,28 @@ def embed(filename_model: str) -> None:
     logger.info('Embed all spectra in directory %s', peak_dir)
     datasets = os.listdir(peak_dir)
     for dataset_i, dataset in enumerate(datasets, 1):
-        filename_embedding = os.path.join(embed_dir, f'{dataset}.parquet')
         filename_metadata = os.path.join(embed_dir, f'{dataset}.parquet')
-        if (os.path.isfile(filename_embedding) and
-                os.path.isfile(filename_metadata)):
+        filename_embedding = os.path.join(embed_dir, f'{dataset}.npy')
+        if (os.path.isfile(filename_metadata) and
+                os.path.isfile(filename_embedding)):
             continue
-        logger.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
-                    len(datasets))
-        encodings, metadata = [], {'filename': [], 'scan': []}
-        for filename in os.listdir(os.path.join(peak_dir, dataset)):
-            try:    # Unknown files will raise a ValueError.
-                logger.debug('Read and encode the spectra from file %s/%s',
-                             dataset, filename)
-                for spec in ms_io.get_spectra(os.path.join(
-                        peak_dir, dataset, filename)):
-                    if spectrum.preprocess(spec, config.fragment_mz_min,
-                                           config.fragment_mz_max).is_valid:
-                        encodings.append(enc.encode(spec))
-                        metadata['filename'].append(filename)
-                        metadata['scan'].append(spec.identifier)
-            except ValueError:
-                pass
-        if len(encodings) > 0:
-            metadata['dataset'] = [dataset] * len(metadata['scan'])
+        filenames = os.listdir(os.path.join(peak_dir, dataset))
+        logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
+                    dataset_i, len(datasets), len(filenames))
+        encodings, metadata = [], []
+        for filename, file_scans, file_encodings in joblib.Parallel(n_jobs=-1)(
+                joblib.delayed(feature._peaks_to_features)
+                (dataset, filename, None, enc) for filename in filenames):
+            if file_scans is not None and len(file_scans) > 0:
+                metadata.extend([(dataset, filename, scan)
+                                 for scan in file_scans])
+                encodings.extend(file_encodings)
+        if len(metadata) > 0:
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                metadata, columns=['dataset', 'filename', 'scan'])),
+                filename_metadata)
             logger.debug('Embed the spectrum encodings')
             embeddings = emb.embed(
                 list(data_generator._split_features_to_input(
                     encodings, *_get_feature_split())), batch_size)
-            logger.debug('Save the embeddings')
             np.save(filename_embedding, np.vstack(embeddings))
-            pq.write_table(pa.Table.from_pandas(pd.DataFrame(metadata)),
-                           filename_metadata)
