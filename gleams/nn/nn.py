@@ -143,13 +143,11 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                 joblib.delayed(feature._peaks_to_features)
                 (dataset, filename, None, enc) for filename in peak_filenames):
             if file_scans is not None and len(file_scans) > 0:
-                metadata.extend([(dataset, filename, scan)
-                                 for scan in file_scans])
+                metadata.extend([(filename, scan) for scan in file_scans])
                 encodings.extend(file_encodings)
         if len(metadata) > 0:
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
-                metadata, columns=['dataset', 'filename', 'scan'])),
-                metadata_filename)
+                metadata, columns=['filename', 'scan'])), metadata_filename)
             logger.debug('Embed the spectrum encodings')
             embeddings = emb.embed(
                 list(data_generator._split_features_to_input(
