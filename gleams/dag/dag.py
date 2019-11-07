@@ -154,6 +154,11 @@ with DAG('gleams', default_args=default_args,
         op_kwargs={'metadata_filename': config.metadata_filename,
                    'model_filename': config.model_filename}
     )
+    t_combine_embed = PythonOperator(
+        task_id=f'combine_embeddings',
+        python_callable=nn.combine_embeddings,
+        op_kwargs={'metadata_filename': config.metadata_filename}
+    )
 
     t_metadata >> t_split_feat
     t_download >> t_enc_feat
@@ -164,3 +169,4 @@ with DAG('gleams', default_args=default_args,
     [t_pairs_pos['train'], t_pairs_neg['train'],
      t_pairs_pos['val'], t_pairs_neg['val']] >> t_train
     t_train >> t_embed
+    t_embed >> t_combine_embed

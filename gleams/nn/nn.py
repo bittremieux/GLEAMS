@@ -91,10 +91,10 @@ def embed(metadata_filename: str, model_filename: str) -> None:
     ----------
     metadata_filename : str
         Metadata file with references to all datasets that should be embedded.
+        Should be a Parquet file.
     model_filename : str
         The GLEAMS model filename.
     """
-    peak_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak')
     embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed',
                              'dataset')
     if not os.path.isdir(embed_dir):
@@ -153,3 +153,45 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                 list(data_generator._split_features_to_input(
                     encodings, *_get_feature_split())), batch_size)
             np.save(filename_embedding, np.vstack(embeddings))
+
+
+def combine_embeddings(metadata_filename: str) -> None:
+    """
+    Combine embedding files for multiple datasets into a single embedding file.
+
+    If the combined embedding file already exists it will _not_ be recreated.
+
+    Parameters
+    ----------
+    metadata_filename : str
+        Embeddings for all datasets included in the metadata will be combined.
+        Should be a Parquet file.
+    """
+    embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed')
+    embed_filename = os.path.join(embed_dir, os.path.splitext(
+        os.path.basename(metadata_filename))[0].replace('metadata', 'embed'))
+    if (os.path.isfile(f'{embed_filename}.npy') and
+            os.path.isfile(f'{embed_filename}.parquet')):
+        return
+    datasets = pd.read_parquet(
+        metadata_filename, columns=['dataset'])['dataset'].unique()
+    logger.info('Combine embeddings for metadata file %s containing %d '
+                'datasets', metadata_filename, len(datasets))
+    embeddings, indexes = [], []
+    for i, dataset in enumerate(datasets, 1):
+        logger.debug('Append dataset %s [%3d/%3d]', dataset, i, len(datasets))
+        dataset_embeddings_filename = os.path.join(
+            embed_dir, 'dataset', f'{dataset}.npy')
+        dataset_index_filename = os.path.join(
+            embed_dir, 'dataset', f'{dataset}.parquet')
+        if (not os.path.isfile(dataset_embeddings_filename) or
+                not os.path.isfile(dataset_index_filename)):
+            logger.warning('Missing embeddings for dataset %s, skipping...',
+                           dataset)
+        else:
+            embeddings.append(np.load(dataset_embeddings_filename))
+            dataset_table = pq.read_table(dataset_index_filename)
+            indexes.append(dataset_table.add_column(0, pa.Column.from_array(
+                'dataset', pa.array([dataset] * dataset_table.num_rows))))
+    np.save(f'{embed_filename}.npy', np.vstack(embeddings))
+    pq.write_table(pa.concat_tables(indexes), f'{embed_filename}.parquet')
