@@ -148,6 +148,11 @@ with DAG('gleams', default_args=default_args,
                                     f'feature_{config.massivekb_task_id}_'
                                     f'val_pairs_neg.npy')}
     )
+    t_embed = PythonOperator(
+        task_id='embed',
+        python_callable=nn.embed,
+        op_kwargs={'filename_model': config.model_filename}
+    )
 
     t_metadata >> t_split_feat
     t_download >> t_enc_feat
@@ -157,3 +162,4 @@ with DAG('gleams', default_args=default_args,
         t_combine_feat[suffix] >> [t_pairs_pos[suffix], t_pairs_neg[suffix]]
     [t_pairs_pos['train'], t_pairs_neg['train'],
      t_pairs_pos['val'], t_pairs_neg['val']] >> t_train
+    t_train >> t_embed
