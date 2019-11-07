@@ -147,12 +147,15 @@ class Embedder:
         Model
             The embedder model.
         """
-        model = (self.siamese_model_parallel if multi_gpu else
-                 self.siamese_model)
-        if model is None:
+        if self.siamese_model_parallel is None or self.siamese_model is None:
             raise ValueError("The embedder model hasn't been constructed yet")
         else:
-            return model.get_layer('embedder')
+            if (multi_gpu and
+                    self.siamese_model_parallel is not self.siamese_model):
+                return self.siamese_model_parallel.get_layer(
+                    'siamese_model').get_layer('embedder')
+            else:
+                return self.siamese_model.get_layer('embedder')
 
     def save(self) -> None:
         """
