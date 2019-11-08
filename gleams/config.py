@@ -60,6 +60,7 @@ fragment_mz_tol = 0.05  # Da
 
 
 # Neural network settings.
+embedding_size = 32
 
 # Training hyperparameters.
 loss_label_certainty = 0.99
@@ -70,3 +71,11 @@ steps_per_epoch = 5000  # 2048 * 5000 = 10,240,000 samples per epoch
 num_epochs = 100
 max_num_pairs_train = None
 max_num_pairs_val = 500000
+
+
+# Clustering settings.
+
+# ANN indexing.
+num_probe = 1024
+num_neighbours = 1024
+ann_add_batch_size = 32768

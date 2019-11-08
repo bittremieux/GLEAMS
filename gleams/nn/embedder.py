@@ -243,7 +243,7 @@ class Embedder:
                               (ref_spectra_pool_1))
 
         # Combine all outputs and add a final dense layer.
-        output_layer = (Dense(32, activation='selu',
+        output_layer = (Dense(config.embedding_size, activation='selu',
                               kernel_initializer='he_uniform', name='output')
                         (concatenate([precursor_dense2, fragment_output,
                                       ref_spectra_output])))
