@@ -78,4 +78,4 @@ max_num_pairs_val = 500000
 # ANN indexing.
 num_probe = 1024
 num_neighbours = 1024
-ann_add_batch_size = 32768
+ann_add_batch_size = 2**24

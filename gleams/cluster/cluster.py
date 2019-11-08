@@ -1,7 +1,7 @@
 import logging
 import math
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import faiss
 import joblib
@@ -57,37 +57,38 @@ def build_ann_index(embeddings_filename: str) -> None:
     # Create an ANN index using Euclidean distance for fast NN queries.
     embeddings = np.load(embeddings_filename, mmap_mode='r')
     num_embeddings = embeddings.shape[0]
+    num_gpus = faiss.get_num_gpus()
     # Figure out a decent value for the num_list hyperparameter based on the
     # number of embeddings. Rules of thumb from the Faiss wiki:
     # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
-    if num_embeddings < 10e6:
+    if num_embeddings < 10e5:
         num_list = 2**math.floor(math.log2(num_embeddings / 39))
-    elif num_embeddings < 10e7:
+    elif num_embeddings < 10e6:
         num_list = 2**16
-    elif num_embeddings < 10e8:
+    elif num_embeddings < 10e7:
         num_list = 2**18
     else:
         num_list = 2**20
-        if num_embeddings > 10e9:
-            logger.warning('More than 1B vectors to be indexed at the same '
-                           'time, consider decreasing the ANN size')
-    logger.info(f'Build the ANN index (%d embeddings, %d lists)',
-                num_embeddings, num_list)
-    # Training the ANN index needs to happen on the CPU because it can't
-    # be batched.
-    # TODO: Prepare the quantizer.
-    #   https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
+        if num_embeddings > 10e8:
+            logger.warning('More than 1B embeddings to be indexed, consider '
+                           'decreasing the ANN size')
+    logger.info('Build the ANN index using %d GPUs (%d embeddings, %d lists)',
+                num_gpus, num_embeddings, num_list)
+    # Large datasets won't fit in the GPU memory, so we first compute coarse
+    # cluster centroids using a subset of the data on the GPU.
+    num_samples = min(num_embeddings, int(max(10e5, 256 * num_list)))
+    logger.debug('Approximate the ANN index cluster centroids using %d '
+                 'embeddings', num_samples)
+    embeddings_sample = embeddings[np.random.choice(
+        embeddings.shape[0], num_samples, False)]
     index_cpu = faiss.IndexIVFFlat(
-        faiss.IndexFlatL2(config.embedding_size), config.embedding_size,
-        num_list, faiss.METRIC_L2)
-    logger.debug('Train the ANN index on the CPU')
+        _build_quantizer(embeddings_sample, num_list),
+        config.embedding_size, num_list, faiss.METRIC_L2)
+    # Finish training on the CPU.
     index_cpu.train(embeddings)
-    # Add the embedding vectors to the index using the GPU for increased
-    # performance.
+    # Add the embeddings to the index using the GPU for increased  performance.
     # Shard the GPU index over all available GPUs.
-    num_gpus = faiss.get_num_gpus()
-    logger.debug('Add the embeddings to the ANN index using %d GPU(s)',
-                 num_gpus)
+    logger.debug('Add the embeddings to the ANN index')
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
     co = faiss.GpuMultipleClonerOptions()
     co.shard = True
@@ -95,11 +96,7 @@ def build_ann_index(embeddings_filename: str) -> None:
     co.useFloat16CoarseQuantizer = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = num_embeddings
-    vres, vdev = faiss.GpuResourcesVector(), faiss.IntVector()
-    for i in range(num_gpus):
-        vres.push_back(faiss.StandardGpuResources())
-        vdev.push_back(i)
-    index_gpu = faiss.index_cpu_to_all_gpus(vres, vdev, index_cpu, co)
+    index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
     # Add the embeddings in batches to avoid exhausting the GPU memory.
     batch_size = config.ann_add_batch_size
     for batch_start in tqdm.tqdm(range(0, num_embeddings, batch_size),
@@ -119,6 +116,39 @@ def build_ann_index(embeddings_filename: str) -> None:
     else:       # Standard index.
         index_src = faiss.index_gpu_to_cpu(index_gpu)
         index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
-    faiss.write_index(index_cpu, os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'ann', f'ann_index.faiss'))
+    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
+    os.makedirs(ann_dir)
+    faiss.write_index(index_cpu, os.path.join(ann_dir, f'ann_index.faiss'))
     index_cpu.reset()
+
+
+def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
+    """
+    Build a quantizer with cluster centroids for ANN indexing using the
+    Euclidean distance.
+
+    The quantizer can be constructed using a subset of all data points,
+    allowing it to be built using the GPU(s).
+
+    Parameters
+    ----------
+    x : np.ndarray
+        The data used to determine cluster centroids.
+    num_centroids : int
+        The number of centroids used by the quantizer.
+
+    Returns
+    -------
+    faiss.IndexFlatL2
+        The Faiss index to be used as quantizer.
+    """
+    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
+    clus = faiss.Clustering(config.embedding_size, num_centroids)
+    clus.max_points_per_centroid = 10000000
+    clus.train(x, faiss.index_cpu_to_all_gpus(
+        faiss.IndexFlatL2(config.embedding_size)))
+    centroids = faiss.vector_float_to_array(clus.centroids)
+    quantizer = faiss.IndexFlatL2(config.embedding_size)
+    quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
+
+    return quantizer
