@@ -139,7 +139,8 @@ def embed(metadata_filename: str, model_filename: str) -> None:
         logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
                     dataset_i, dataset_total, len(peak_filenames))
         scans, encodings = [], []
-        for filename, file_scans, file_encodings in joblib.Parallel(n_jobs=-1)(
+        for filename, file_scans, file_encodings in joblib.Parallel(
+                n_jobs=-1, backend='multiprocessing')(
                 joblib.delayed(feature._peaks_to_features)
                 (dataset, filename, None, enc) for filename in peak_filenames):
             if file_scans is not None and len(file_scans) > 0:
