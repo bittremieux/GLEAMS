@@ -54,6 +54,13 @@ def build_ann_index(embeddings_filename: str) -> None:
     embeddings_filename : str
         NumPy file containing the embedding vectors to build the ANN index.
     """
+    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
+    if not os.path.isdir(ann_dir):
+        os.makedirs(ann_dir)
+    index_filename = os.path.join(ann_dir, os.path.splitext(
+        os.path.basename(embeddings_filename))[0].replace('embed', 'ann'))
+    if os.path.isfile(index_filename):
+        return
     # Create an ANN index using Euclidean distance for fast NN queries.
     embeddings = np.load(embeddings_filename, mmap_mode='r')
     num_embeddings = embeddings.shape[0]
@@ -116,9 +123,7 @@ def build_ann_index(embeddings_filename: str) -> None:
     else:       # Standard index.
         index_src = faiss.index_gpu_to_cpu(index_gpu)
         index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
-    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
-    os.makedirs(ann_dir)
-    faiss.write_index(index_cpu, os.path.join(ann_dir, f'ann_index.faiss'))
+    faiss.write_index(index_cpu, index_filename)
     index_cpu.reset()
 
 
