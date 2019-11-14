@@ -353,29 +353,25 @@ class Embedder:
             epochs=num_epochs, callbacks=callbacks,
             validation_data=val_generator)
 
-    def embed(self, x: List[np.ndarray],
-              batch_size: int = None) -> np.ndarray:
+    def embed(self, encodings_generator: data_generator.EncodingsSequence)\
+            -> np.ndarray:
         """
         Transform samples using the embedder model.
 
         Parameters
         ----------
-        x : List[np.ndarray]
-            The input samples as a list of length three representing the
-            precursor features, fragment features, and reference spectra
-            features.
-        batch_size : int
-            If the batch size is not specified the batch size specified in the
-            config will be used.
+        encodings_generator: data_generator.EncodingsSequence
+            A generator that gives the input samples as batches of a list of
+            length three representing the precursor features, fragment
+            features, and reference spectra features.
 
         Returns
         -------
         np.ndarray
             The embeddings of the given samples.
         """
-        if batch_size is None:
-            batch_size = config.batch_size
-        return self._get_embedder_model(True).predict(x, batch_size)
+        return self._get_embedder_model(True).predict_generator(
+            encodings_generator)
 
 
 class EmbedderWeightsSaver(keras.callbacks.Callback):

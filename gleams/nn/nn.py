@@ -150,10 +150,10 @@ def embed(metadata_filename: str, model_filename: str) -> None:
             pq.write_table(pa.Table.from_pandas(pd.DataFrame(
                 scans, columns=['filename', 'scan'])), filename_scans)
             logger.debug('Embed the spectrum encodings')
-            embeddings = emb.embed(
-                list(data_generator._split_features_to_input(
-                    encodings, *_get_feature_split())), batch_size)
-            np.save(filename_embedding, np.vstack(embeddings))
+            encodings_generator = data_generator.EncodingsSequence(
+                encodings, batch_size, _get_feature_split())
+            np.save(filename_embedding,
+                    np.vstack(emb.embed(encodings_generator)))
 
 
 def combine_embeddings(metadata_filename: str) -> None:

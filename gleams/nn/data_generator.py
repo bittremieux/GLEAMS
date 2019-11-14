@@ -115,6 +115,61 @@ class PairSequence(Sequence):
             np.random.shuffle(self.pairs_neg)
 
 
+class EncodingsSequence(Sequence):
+
+    def __init__(self, encodings: List[np.ndarray], batch_size: int,
+                 feature_split: Tuple[int, int]):
+        """
+        Initialize the EncodingsSequence generator.
+
+        Parameters
+        ----------
+        encodings : List[np.ndarray]
+            A list of encodings as a single NumPy array.
+        batch_size : int
+            The (maximum) size of each batch. Batch sizes can sometimes be
+            smaller than this maximum size in case of missing feature vectors.
+        feature_split : Tuple[int, int]
+            Indexes on which the feature vectors are split into individual
+            inputs to the separate parts of the neural network (precursor
+            features, fragment features, reference spectra features).
+        """
+        self.encodings = encodings
+        self.batch_size = batch_size
+        self.feature_split = feature_split
+
+    def __len__(self) -> int:
+        """
+        Gives the total number of batches.
+
+        Returns
+        -------
+        int
+            The number of batches.
+        """
+        return int(math.ceil(len(self.encodings) / self.batch_size))
+
+    def __getitem__(self, idx: int)\
+            -> List[np.ndarray]:
+        """
+        Get the batch of encodings arrays with the given index.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the requested batch.
+
+        Returns
+        -------
+        List[np.ndarray]
+            A batch of encodings consisting of three NumPy arrays for the three
+            input elements of the neural network.
+        """
+        return list(_split_features_to_input(
+            self.encodings[idx * self.batch_size:(idx + 1) * self.batch_size],
+            *self.feature_split))
+
+
 def _split_features_to_input(x: List[np.ndarray], idx1: int, idx2: int)\
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
