@@ -147,8 +147,9 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                 scans.extend([(filename, scan) for scan in file_scans])
                 encodings.extend(file_encodings)
         if len(scans) > 0:
-            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
-                scans, columns=['filename', 'scan'])), filename_scans)
+            scans_df = pd.DataFrame(scans, columns=['filename', 'scan'])
+            scans_df['scans'] = scans_df['scans'].astype(np.int64)
+            pq.write_table(pa.Table.from_pandas(scans_df), filename_scans)
             logger.debug('Embed the spectrum encodings')
             encodings_generator = data_generator.EncodingsSequence(
                 encodings, batch_size, _get_feature_split())
