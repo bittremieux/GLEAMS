@@ -1,7 +1,7 @@
 import logging
 import math
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import faiss
 import joblib
@@ -32,10 +32,10 @@ def _check_ann_config() -> None:
                        'GPU-enabled ANN indexing), %d was supplied',
                        config.num_probe)
         config.num_probe = 1024
-    if config.num_neighbours > 1024:
+    if config.num_neighbors > 1024:
         logger.warning('Using num_neighbours=1024 (maximum supported value '
                        'for GPU-enabled ANN indexing), %d was supplied',
-                       config.num_neighbours)
+                       config.num_neighbors)
         config.num_neighbours = 1024
 
 
@@ -113,7 +113,7 @@ def build_ann_index(embeddings_filename: str) -> None:
         index_gpu.add_with_ids(embeddings[batch_start:batch_stop],
                                np.arange(batch_start, batch_stop))
     # Combine the sharded index into a single index and save.
-    logger.debug('Save the ANN index')
+    logger.debug('Save the ANN index to file %s', index_filename)
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
     if hasattr(index_gpu, 'at'):    # Sharded index.
         for i in range(num_gpus):
@@ -150,8 +150,12 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
     clus = faiss.Clustering(config.embedding_size, num_centroids)
     clus.max_points_per_centroid = 10000000
+    co = faiss.GpuMultipleClonerOptions()
+    co.useFloat16 = True
+    co.useFloat16CoarseQuantizer = False
+    co.reserveVecs = x.shape[0]
     clus.train(x, faiss.index_cpu_to_all_gpus(
-        faiss.IndexFlatL2(config.embedding_size)))
+        faiss.IndexFlatL2(config.embedding_size), co))
     centroids = faiss.vector_float_to_array(clus.centroids)
     quantizer = faiss.IndexFlatL2(config.embedding_size)
     quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
