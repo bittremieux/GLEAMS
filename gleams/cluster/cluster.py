@@ -189,7 +189,7 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
                  config.num_neighbors)
     index = _load_ann_index(ann_filename)
     batch_size_query = min(num_embeddings, config.ann_search_batch_size)
-    distances = np.empty(num_embeddings * config.num_neighbors, np.float16)
+    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
     neighbors = np.empty((num_embeddings * config.num_neighbors, 2), np.int64)
     neighbors[:, 0] = np.repeat(np.arange(num_embeddings, dtype=np.int64),
                                 config.num_neighbors)
@@ -215,7 +215,7 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
     neighbors, distances = neighbors[idx], distances[idx]
     pairwise_distances = sparse.csr_matrix(
         (distances, (neighbors[:, 0], neighbors[:, 1])),
-        (num_embeddings, num_embeddings), np.float16, False)
+        (num_embeddings, num_embeddings), np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     sparse.save_npz(dist_filename, pairwise_distances, False)
 
@@ -244,3 +244,30 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
     return faiss.index_cpu_to_all_gpus(index_cpu, co)
+
+
+def cluster(distances_filename: str):
+    """
+    DBSCAN clustering of the embeddings based on a pairwise distance matrix.
+
+    Parameters
+    ----------
+    distances_filename : str
+        Precomputed pairwise distance matrix file to use for the DBSCAN
+        clustering.
+    """
+    clusters_filename = (distances_filename.replace('dist_', 'clusters_')
+                                           .replace('.npz', '.npy'))
+    if os.path.isfile(clusters_filename):
+        return
+    logger.info('DBSCAN clustering (eps=%.2f, min_samples=%d) of precomputed '
+                'pairwise distance matrix %s', config.eps, config.min_samples,
+                distances_filename)
+    dbscan = DBSCAN(config.eps, config.min_samples, 'precomputed',
+                    n_jobs=-1)
+    pairwise_distances = sparse.load_npz(distances_filename)
+    clusters = dbscan.fit_predict(pairwise_distances)
+    logger.debug('%d embeddings partitioned in %d clusters',
+                 pairwise_distances.shape[0], len(np.unique(clusters)))
+    logger.debug('Save the cluster assignments to file %s', clusters_filename)
+    np.save(clusters_filename, clusters)
