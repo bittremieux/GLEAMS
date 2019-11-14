@@ -1,15 +1,11 @@
 import logging
 import math
 import os
-from typing import Dict, List
 
 import faiss
-import joblib
 import numpy as np
-import pandas as pd
 import tqdm
 from sklearn.cluster import DBSCAN
-from sklearn.metrics import homogeneity_completeness_v_measure
 from scipy import sparse
 
 from gleams import config
