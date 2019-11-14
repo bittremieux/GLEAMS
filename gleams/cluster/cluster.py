@@ -161,3 +161,86 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
     quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
 
     return quantizer
+
+
+def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
+        -> None:
+    """
+    Compute a pairwise distance matrix for the embeddings in the given file.
+    The given ANN index should correspond to these embeddings as well and is
+    used to perform efficient nearest neighbor queries.
+
+    Parameters
+    ----------
+    embeddings_filename : str
+        NumPy file containing the embedding vectors for which to compute
+        pairwise distances.
+    ann_filename : str
+        Faiss index to perform nearest neighbor queries.
+    """
+    dist_filename = (ann_filename.replace('ann_', 'dist_')
+                                 .replace('.faiss', '.npz'))
+    if os.path.isfile(dist_filename):
+        return
+    embeddings = np.load(embeddings_filename, mmap_mode='r')
+    num_embeddings = embeddings.shape[0]
+    logging.info('Compute pairwise distances between neighboring embeddings '
+                 '(%d embeddings, %d neighbors)', num_embeddings,
+                 config.num_neighbors)
+    index = _load_ann_index(ann_filename)
+    batch_size_query = min(num_embeddings, config.ann_search_batch_size)
+    distances = np.empty(num_embeddings * config.num_neighbors, np.float16)
+    neighbors = np.empty((num_embeddings * config.num_neighbors, 2), np.int64)
+    neighbors[:, 0] = np.repeat(np.arange(num_embeddings, dtype=np.int64),
+                                config.num_neighbors)
+    for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size_query),
+                             desc='Batches processed', leave=False,
+                             unit='batch'):
+        batch_start = batch_i
+        batch_stop = min(batch_i + batch_size_query, num_embeddings)
+        # Use the ANN index to efficiently compute the distances to the
+        # nearest neighbors for the current batch of embeddings.
+        dist_start = batch_start * config.num_neighbors
+        dist_stop = (dist_start
+                     + config.num_neighbors * (batch_stop - batch_start))
+        batch_scores, batch_neighbors = index.search(
+            embeddings[batch_start:batch_stop], config.num_neighbors)
+        distances[dist_start:dist_stop] = batch_scores.flatten()
+        neighbors[dist_start:dist_stop, 1] = batch_neighbors.flatten()
+    index.reset()
+    # Convert to a sparse pairwise distance matrix. This matrix might not be
+    # entirely symmetrical, but that shouldn't matter too much.
+    logger.debug('Construct pairwise distance matrix')
+    idx = ~(neighbors[:, 1] == -1)
+    neighbors, distances = neighbors[idx], distances[idx]
+    pairwise_distances = sparse.csr_matrix(
+        (distances, (neighbors[:, 0], neighbors[:, 1])),
+        (num_embeddings, num_embeddings), np.float16, False)
+    logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
+    sparse.save_npz(dist_filename, pairwise_distances, False)
+
+
+def _load_ann_index(index_filename: str) -> faiss.Index:
+    """
+    Load the ANN index from the given file and move it to the GPU(s).
+
+    Parameters
+    ----------
+    index_filename : str
+        The ANN index filename.
+
+    Returns
+    -------
+    faiss.Index
+        The Faiss `Index`.
+    """
+    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
+    logger.debug('Load the ANN index from file %s', index_filename)
+    index_cpu = faiss.read_index(index_filename)
+    co = faiss.GpuMultipleClonerOptions()
+    co.shard = True
+    co.useFloat16 = True
+    co.useFloat16CoarseQuantizer = False
+    co.indicesOptions = faiss.INDICES_CPU
+    co.reserveVecs = index_cpu.ntotal
+    return faiss.index_cpu_to_all_gpus(index_cpu, co)
