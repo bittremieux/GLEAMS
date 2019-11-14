@@ -23,6 +23,7 @@ from airflow.utils import helpers
 import tensorflow.compat.v1 as tf
 
 from gleams import config
+from gleams.cluster import cluster
 from gleams.feature import feature
 from gleams.metadata import metadata
 from gleams.nn import nn
@@ -64,8 +65,6 @@ with DAG('gleams', default_args=default_args,
          schedule_interval=datetime.timedelta(weeks=1)) as dag:
     suffixes = ['train', 'val', 'test']
 
-    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
-
     t_metadata = PythonOperator(
         task_id='convert_massivekb_metadata',
         python_callable=metadata.convert_massivekb_metadata,
@@ -98,6 +97,7 @@ with DAG('gleams', default_args=default_args,
                            '.parquet', f'_{suffix}.parquet')})
         for suffix in suffixes
     }
+    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
     t_pairs_pos = {
         suffix: PythonOperator(
             task_id=f'generate_pairs_positive_{suffix}',
@@ -155,9 +155,34 @@ with DAG('gleams', default_args=default_args,
                    'model_filename': config.model_filename}
     )
     t_combine_embed = PythonOperator(
-        task_id=f'combine_embeddings',
+        task_id='combine_embeddings',
         python_callable=nn.combine_embeddings,
         op_kwargs={'metadata_filename': config.metadata_filename}
+    )
+    embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed')
+    embed_filename = os.path.join(embed_dir, os.path.splitext(
+        os.path.basename(config.metadata_filename))[0]
+                                  .replace('metadata_', 'embed_'))
+    t_build_ann_index = PythonOperator(
+        task_id='build_ann_index',
+        python_callable=cluster.build_ann_index,
+        op_kwargs={'embeddings_filename': embed_filename}
+    )
+    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
+    ann_filename = os.path.join(ann_dir, os.path.splitext(
+        os.path.basename(embed_filename))[0].replace('embed_', 'ann_'))
+    t_pairwise_dist = PythonOperator(
+        task_id='compute_pairwise_distances',
+        python_callable=cluster.compute_pairwise_distances,
+        op_kwargs={'embeddings_filename': embed_filename,
+                   'ann_filename': ann_filename}
+    )
+    dist_filename = (ann_filename.replace('ann_', 'dist_')
+                                 .replace('.faiss', '.npz'))
+    t_cluster = PythonOperator(
+        task_id='compute_pairwise_distances',
+        python_callable=cluster.cluster,
+        op_kwargs={'distances_filename': dist_filename}
     )
 
     t_metadata >> t_split_feat
@@ -170,3 +195,6 @@ with DAG('gleams', default_args=default_args,
      t_pairs_pos['val'], t_pairs_neg['val']] >> t_train
     t_train >> t_embed
     t_embed >> t_combine_embed
+    t_combine_embed >> t_build_ann_index
+    t_build_ann_index >> t_pairwise_dist
+    t_pairwise_dist >> t_cluster

@@ -171,7 +171,7 @@ def combine_embeddings(metadata_filename: str) -> None:
     """
     embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed')
     embed_filename = os.path.join(embed_dir, os.path.splitext(
-        os.path.basename(metadata_filename))[0].replace('metadata', 'embed'))
+        os.path.basename(metadata_filename))[0].replace('metadata_', 'embed_'))
     if (os.path.isfile(f'{embed_filename}.npy') and
             os.path.isfile(f'{embed_filename}.parquet')):
         return

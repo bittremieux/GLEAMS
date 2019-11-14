@@ -54,7 +54,7 @@ def build_ann_index(embeddings_filename: str) -> None:
     if not os.path.isdir(ann_dir):
         os.makedirs(ann_dir)
     index_filename = os.path.join(ann_dir, os.path.splitext(
-        os.path.basename(embeddings_filename))[0].replace('embed', 'ann'))
+        os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_'))
     if os.path.isfile(index_filename):
         return
     # Create an ANN index using Euclidean distance for fast NN queries.
