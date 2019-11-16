@@ -240,7 +240,9 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     co.useFloat16CoarseQuantizer = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
-    return faiss.index_cpu_to_all_gpus(index_cpu, co)
+    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
+    index.setNumProbes(config.num_probe)
+    return index
 
 
 def cluster(distances_filename: str):
