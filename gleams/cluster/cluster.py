@@ -112,13 +112,14 @@ def build_ann_index(embeddings_filename: str) -> None:
     logger.debug('Save the ANN index to file %s', index_filename)
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
     if hasattr(index_gpu, 'at'):    # Sharded index.
-        for i in range(num_gpus):
+        for i in range(index_gpu.count()):
             index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
             index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
             index_gpu.at(i).reset()
     else:       # Standard index.
         index_src = faiss.index_gpu_to_cpu(index_gpu)
         index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
+        index_gpu.reset()
     faiss.write_index(index_cpu, index_filename)
     index_cpu.reset()
 
