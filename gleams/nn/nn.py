@@ -139,43 +139,34 @@ def embed(metadata_filename: str, model_filename: str) -> None:
             continue
         logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
                     dataset_i, dataset_total, len(peak_filenames))
-        scans, encodings, num_cached = [], [], 0
-        for filename, file_scans, file_encodings in joblib.Parallel(
-                n_jobs=-1, backend='multiprocessing')(
-                joblib.delayed(feature._peaks_to_features)
-                (dataset, filename, None, enc) for filename in peak_filenames):
-            if file_scans is not None and len(file_scans) > 0:
-                scans.extend([(filename, scan) for scan in file_scans])
-                encodings.extend(file_encodings)
-                # Store embeddings every 10M spectra to a temporary file to
-                # avoid running out of memory.
-                if len(encodings) >= 10000000:
-                    num_cached += 1
-                    _embed_and_save(
-                        encodings, batch_size, emb, filename_embedding.replace(
-                            '.npy', f'_{num_cached}.npy'))
-                    encodings = []
+        peak_filenames_chunked = np.array_split(
+            peak_filenames, max(1, len(peak_filenames) // 1000))
+        scans = []
+        for i, chunk_filenames in enumerate(peak_filenames_chunked):
+            encodings = []
+            for filename, file_scans, file_encodings in joblib.Parallel(
+                    n_jobs=-1, backend='multiprocessing')(
+                        joblib.delayed(feature._peaks_to_features)
+                        (dataset, filename, None, enc)
+                        for filename in chunk_filenames):
+                if file_scans is not None and len(file_scans) > 0:
+                    scans.extend([(filename, scan) for scan in file_scans])
+                    encodings.extend(file_encodings)
+            if len(encodings) > 0:
+                _embed_and_save(
+                    encodings, batch_size, emb,
+                    filename_embedding.replace('.npy', f'_{i}.npy'))
         if len(scans) > 0:
             scans_df = pd.DataFrame(scans, columns=['filename', 'scan'])
-            scans_df['scans'] = scans_df['scans'].astype(np.int64)
+            scans_df['scan'] = scans_df['scan'].astype(np.int64)
             pq.write_table(pa.Table.from_pandas(scans_df), filename_scans)
-            # No temporary files were used, so just embed and write all
-            # encodings.
-            if num_cached == 0:
-                _embed_and_save(encodings, batch_size, emb, filename_embedding)
-            # Temporary files were used, so embed and write the final encodings
-            # and then merge all temporary files.
-            else:
-                num_cached += 1
-                _embed_and_save(
-                    encodings, batch_size, emb, filename_embedding.replace(
-                        '.npy', f'_{num_cached}.npy'))
-                embeddings = [np.load(filename_embedding.replace(
-                                  '.npy', f'_{i}.npy'), mmap_mode='r')
-                              for i in range(1, num_cached + 1)]
-                np.save(filename_embedding, np.vstack(embeddings))
-                for i in range(1, num_cached + 1):
-                    os.remove(filename_embedding.replace('.npy', f'_{i}.npy'))
+            # Merge all temporary embeddings into a single file.
+            embeddings = [np.load(filename_embedding.replace(
+                              '.npy', f'_{i}.npy'), mmap_mode='r')
+                          for i in range(len(peak_filenames_chunked))]
+            np.save(filename_embedding, np.vstack(embeddings))
+            for i in range(len(peak_filenames_chunked)):
+                os.remove(filename_embedding.replace('.npy', f'_{i}.npy'))
 
 
 def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
