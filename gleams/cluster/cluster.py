@@ -241,7 +241,11 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
     index = faiss.index_cpu_to_all_gpus(index_cpu, co)
-    index.setNumProbes(config.num_probe)
+    if hasattr(index, 'at'):
+        for i in range(index.count()):
+            faiss.downcast_index(index.at(i)).nprobe = config.num_probe
+    else:
+        index.nprobe = config.num_probe
     return index
 
 
