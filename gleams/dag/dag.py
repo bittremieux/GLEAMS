@@ -169,8 +169,9 @@ with DAG('gleams', default_args=default_args,
         op_kwargs={'embeddings_filename': embed_filename}
     )
     ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
-    ann_filename = os.path.join(ann_dir, os.path.splitext(
-        os.path.basename(embed_filename))[0].replace('embed_', 'ann_'))
+    ann_filename = os.path.splitext(
+        os.path.basename(embed_filename))[0].replace('embed_', 'ann_')
+    ann_filename = os.path.join(ann_dir, f'{ann_filename}.faiss')
     t_pairwise_dist = PythonOperator(
         task_id='compute_pairwise_distances',
         python_callable=cluster.compute_pairwise_distances,

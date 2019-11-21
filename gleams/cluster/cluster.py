@@ -53,8 +53,9 @@ def build_ann_index(embeddings_filename: str) -> None:
     ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
     if not os.path.isdir(ann_dir):
         os.makedirs(ann_dir)
-    index_filename = os.path.join(ann_dir, os.path.splitext(
-        os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_'))
+    index_filename = os.path.splitext(
+        os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_')
+    index_filename = os.path.join(ann_dir, f'{index_filename}.faiss')
     if os.path.isfile(index_filename):
         return
     # Create an ANN index using Euclidean distance for fast NN queries.
