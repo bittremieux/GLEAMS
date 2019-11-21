@@ -110,15 +110,15 @@ def split_metadata_train_val_test(
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
         logger.debug('Save validation metadata file to %s', filename_val)
-        metadata.loc[selected_val].to_parquet(filename_val, index=True)
+        metadata.loc[selected_val].reset_index().to_parquet(filename_val)
         datasets = datasets.drop(selected_val)
     if num_test > 0:
         selected_test = _select_datasets(datasets, num_test, abs_tol)
         logger.debug('Save test metadata file to %s', filename_test)
-        metadata.loc[selected_test].to_parquet(filename_test, index=True)
+        metadata.loc[selected_test].reset_index().to_parquet(filename_test)
         datasets = datasets.drop(selected_test)
     logger.debug('Save train metadata file to %s', filename_train)
-    metadata.loc[datasets.index].to_parquet(filename_train, index=True)
+    metadata.loc[datasets.index].reset_index().to_parquet(filename_train)
 
 
 def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\

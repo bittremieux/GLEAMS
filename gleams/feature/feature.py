@@ -161,8 +161,8 @@ def combine_features(metadata_filename: str) -> None:
     if (os.path.isfile(f'{feat_filename}.npy') and
             os.path.isfile(f'{feat_filename}.parquet')):
         return
-    datasets = (pd.read_parquet(metadata_filename, columns=['dataset']).index
-                .unique().values)
+    datasets = pd.read_parquet(
+        metadata_filename, columns=['dataset'])['dataset'].unique()
     logger.info('Combine features for metadata file %s containing %d datasets',
                 metadata_filename, len(datasets))
     encodings, indexes = [], []
