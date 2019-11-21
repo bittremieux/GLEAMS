@@ -178,8 +178,6 @@ def combine_features(metadata_filename: str) -> None:
                            dataset)
         else:
             encodings.append(np.load(dataset_encodings_filename))
-            dataset_table = pq.read_table(dataset_index_filename)
-            indexes.append(dataset_table.add_column(0, pa.Column.from_array(
-                'dataset', pa.array([dataset] * dataset_table.num_rows))))
+            indexes.append(pq.read_table(dataset_index_filename))
     np.save(f'{feat_filename}.npy', np.vstack(encodings))
     pq.write_table(pa.concat_tables(indexes), f'{feat_filename}.parquet')
