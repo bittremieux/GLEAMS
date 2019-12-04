@@ -44,8 +44,9 @@ def get_spectra(source: Union[IO, str], scan_nrs: Sequence[int] = None)\
             try:
                 yield _parse_spectrum(spectrum)
             except ValueError as e:
-                logger.warning(f'Failed to read spectrum '
-                               f'{spectrum["params"]["title"]}: %s', e)
+                pass
+                # logger.warning(f'Failed to read spectrum '
+                #                f'{spectrum["params"]["title"]}: %s', e)
 
 
 def _parse_spectrum(spectrum_dict: Dict) -> MsmsSpectrum:

@@ -47,8 +47,9 @@ def get_spectra(source: Union[IO, str], scan_nrs: Sequence[int] = None)\
                 try:
                     yield _parse_spectrum(spectrum)
                 except ValueError as e:
-                    logger.warning(f'Failed to read spectrum %s: %s',
-                                   spectrum['id'], e)
+                    pass
+                    # logger.warning(f'Failed to read spectrum %s: %s',
+                    #                spectrum['id'], e)
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
 
