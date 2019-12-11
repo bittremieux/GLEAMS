@@ -227,7 +227,8 @@ def combine_embeddings(metadata_filename: str) -> None:
         else:
             embeddings.append(np.load(dataset_embeddings_filename))
             dataset_table = pq.read_table(dataset_index_filename)
-            indexes.append(dataset_table.add_column(0, pa.Column.from_array(
-                'dataset', pa.array([dataset] * dataset_table.num_rows))))
+            indexes.append(dataset_table.add_column(
+                0, pa.field('dataset', pa.string()),
+                pa.array([dataset] * dataset_table.num_rows)))
     np.save(f'{embed_filename}.npy', np.vstack(embeddings))
     pq.write_table(pa.concat_tables(indexes), f'{embed_filename}.parquet')
