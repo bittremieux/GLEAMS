@@ -19,7 +19,7 @@ logger = logging.getLogger('gleams')
 def _peaks_to_features(dataset: str, filename: str,
                        metadata: Optional[pd.DataFrame],
                        enc: encoder.SpectrumEncoder)\
-        -> Tuple[str, Optional[List[str]], Optional[List[np.ndarray]]]:
+        -> Tuple[str, Optional[pd.DataFrame], Optional[List[np.ndarray]]]:
     """
     Convert the spectra with the given identifiers in the given file to a
     feature array.
@@ -39,10 +39,10 @@ def _peaks_to_features(dataset: str, filename: str,
 
     Returns
     -------
-    Tuple[str, Optional[List[str]], Optional[List[np.ndarray]]]
+    Tuple[str, Optional[pd.DataFrame], Optional[List[np.ndarray]]]
         A tuple of length 3 containing: the name of the file that has been
-        converted, the identifiers (scan numbers) of the converted spectra, the
-        converted spectra.
+        converted, information about the converted spectra (scan number,
+        precursor charge, and precursor m/z), the converted spectra.
         If the given file does not exist the final two elements of the tuple
         are None.
     """
@@ -53,18 +53,21 @@ def _peaks_to_features(dataset: str, filename: str,
                        peak_filename)
         return filename, None, None
     logger.debug('Process file %s/%s', dataset, filename)
-    file_scans, file_encodings = [], []
+    file_scans, file_mz, file_charge, file_encodings = [], [], [], []
     if metadata is not None:
         metadata = metadata.reset_index(['dataset', 'filename'], drop=True)
     for spec in ms_io.get_spectra(peak_filename):
-        scan = str(spec.identifier)
-        if ((metadata is None or scan in metadata.index) and
-                spectrum.preprocess(spec, config.fragment_mz_min,
-                                    config.fragment_mz_max).is_valid):
-            file_scans.append(scan)
+        if ((metadata is None or np.int64(spec.identifier) in metadata.index)
+                and spectrum.preprocess(spec, config.fragment_mz_min,
+                                        config.fragment_mz_max).is_valid):
+            file_scans.append(spec.identifier)
+            file_mz.append(spec.precursor_mz)
+            file_charge.append(spec.precursor_charge)
             file_encodings.append(enc.encode(spec))
-
-    return filename, file_scans, file_encodings
+    scans = pd.DataFrame({'scan': file_scans, 'charge': file_charge,
+                          'mz': file_mz})
+    scans['scan'] = scans['scan'].astype(np.int64)
+    return filename, scans, file_encodings
 
 
 def convert_peaks_to_features(metadata_filename: str)\
@@ -86,7 +89,6 @@ def convert_peaks_to_features(metadata_filename: str)\
         The metadata file name. Should be a Parquet file.
     """
     metadata = pd.read_parquet(metadata_filename)
-    metadata['scan'] = metadata['scan'].astype(str)
     metadata = metadata.set_index(['dataset', 'filename', 'scan'])
 
     enc = encoder.MultipleEncoder([
@@ -133,14 +135,13 @@ def convert_peaks_to_features(metadata_filename: str)\
                             'filename', as_index=False, sort=False)):
                 if file_scans is not None and len(file_scans) > 0:
                     metadata_index.extend([(dataset, filename, scan)
-                                           for scan in file_scans])
+                                           for scan in file_scans['scan']])
                     encodings.extend(file_encodings)
             # Store the encoded spectra in a file per dataset.
             if len(metadata_index) > 0:
                 np.save(filename_encodings, np.vstack(encodings))
-                pq.write_table(pa.Table.from_pandas(
-                    metadata.loc[metadata_index], preserve_index=True),
-                    filename_index)
+                metadata.loc[metadata_index].reset_index().to_parquet(
+                    filename_index, index=False)
 
 
 def combine_features(metadata_filename: str) -> None:

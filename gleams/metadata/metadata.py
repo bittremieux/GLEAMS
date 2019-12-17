@@ -51,6 +51,7 @@ def convert_massivekb_metadata(massivekb_filename: str,
         dataset_filename = metadata['filename'].str.split('/').str
         metadata['dataset'] = dataset_filename[0]
         metadata['filename'] = dataset_filename[-1]
+        metadata['scan'] = metadata['scan'].astype(np.int64)
         metadata = metadata.sort_values(['dataset', 'filename', 'scan'])
         metadata = metadata[['dataset', 'filename', 'scan', 'sequence',
                              'charge', 'mz']]

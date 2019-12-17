@@ -145,21 +145,23 @@ def embed(metadata_filename: str, model_filename: str) -> None:
         for i, chunk_filenames in enumerate(peak_filenames_chunked):
             encodings = []
             for filename, file_scans, file_encodings in joblib.Parallel(
-                    n_jobs=-1, backend='multiprocessing')(
+                    n_jobs=-1)(
                         joblib.delayed(feature._peaks_to_features)
                         (dataset, filename, None, enc)
                         for filename in chunk_filenames):
                 if file_scans is not None and len(file_scans) > 0:
-                    scans.extend([(filename, scan) for scan in file_scans])
+                    file_scans['dataset'] = dataset
+                    file_scans['filename'] = filename
+                    scans.append(file_scans)
                     encodings.extend(file_encodings)
             if len(encodings) > 0:
                 _embed_and_save(
                     encodings, batch_size, emb,
                     filename_embedding.replace('.npy', f'_{i}.npy'))
         if len(scans) > 0:
-            scans_df = pd.DataFrame(scans, columns=['filename', 'scan'])
-            scans_df['scan'] = scans_df['scan'].astype(np.int64)
-            pq.write_table(pa.Table.from_pandas(scans_df), filename_scans)
+            scans = pd.concat(scans, ignore_index=True, sort=False, copy=False)
+            scans[['dataset', 'filename', 'scan', 'charge', 'mz']].to_parquet(
+                filename_scans, index=False)
             # Merge all temporary embeddings into a single file.
             embeddings = [np.load(filename_embedding.replace(
                               '.npy', f'_{i}.npy'), mmap_mode='r')
