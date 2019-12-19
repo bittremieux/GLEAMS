@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from keras import backend as K
 
 from gleams import config
 from gleams.feature import encoder, feature
@@ -118,11 +119,6 @@ def embed(metadata_filename: str, model_filename: str) -> None:
             config.num_ref_spectra)
     ])
 
-    logger.debug('Load the stored GLEAMS neural network')
-    emb = embedder.Embedder(
-        config.num_precursor_features, config.num_fragment_features,
-        config.num_ref_spectra, config.lr, model_filename)
-    emb.load()
     num_gpus = embedder._get_num_gpus()
     if num_gpus == 0:
         raise RuntimeError('No GPU found')
@@ -156,7 +152,7 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                     encodings.extend(file_encodings)
             if len(encodings) > 0:
                 _embed_and_save(
-                    encodings, batch_size, emb,
+                    encodings, batch_size, model_filename,
                     filename_embedding.replace('.npy', f'_{i}.npy'))
         if len(scans) > 0:
             scans = pd.concat(scans, ignore_index=True, sort=False, copy=False)
@@ -172,7 +168,7 @@ def embed(metadata_filename: str, model_filename: str) -> None:
 
 
 def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
-                    emb: embedder.Embedder, filename: str) -> None:
+                    model_filename: str, filename: str) -> None:
     """
     Embed the given encodings and save them as a NumPy file.
 
@@ -182,15 +178,23 @@ def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
         A list of encoding arrays to be embedded.
     batch_size : int
         The number of encodings to embed simultaneously.
-    emb : embedder.Embedder
-        The embedder neural network to embed the encodings.
+    model_filename : str
+        The GLEAMS model filename.
     filename : str
         File name to store the embedded encodings.
     """
+    logger.debug('Load the stored GLEAMS neural network')
+    emb = embedder.Embedder(
+        config.num_precursor_features, config.num_fragment_features,
+        config.num_ref_spectra, config.lr, model_filename)
+    emb.load()
     logger.debug('Embed the spectrum encodings and save to file %s', filename)
     encodings_generator = data_generator.EncodingsSequence(
         encodings, batch_size, _get_feature_split())
     np.save(filename, np.vstack(emb.embed(encodings_generator)))
+    # FIXME: Avoid Keras memory leak.
+    #        Possible issue: https://github.com/keras-team/keras/issues/13118
+    K.clear_session()
 
 
 def combine_embeddings(metadata_filename: str) -> None:
@@ -228,9 +232,6 @@ def combine_embeddings(metadata_filename: str) -> None:
                            dataset)
         else:
             embeddings.append(np.load(dataset_embeddings_filename))
-            dataset_table = pq.read_table(dataset_index_filename)
-            indexes.append(dataset_table.add_column(
-                0, pa.field('dataset', pa.string()),
-                pa.array([dataset] * dataset_table.num_rows)))
+            indexes.append(pq.read_table(dataset_index_filename))
     np.save(f'{embed_filename}.npy', np.vstack(embeddings))
     pq.write_table(pa.concat_tables(indexes), f'{embed_filename}.parquet')
