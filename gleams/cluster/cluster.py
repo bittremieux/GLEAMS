@@ -264,7 +264,7 @@ def cluster(distances_filename: str):
                                            .replace('.npz', '.npy'))
     if os.path.isfile(clusters_filename):
         return
-    logger.info('DBSCAN clustering (eps=%.2f, min_samples=%d) of precomputed '
+    logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
     dbscan = DBSCAN(config.eps, config.min_samples, 'precomputed', n_jobs=-1)
