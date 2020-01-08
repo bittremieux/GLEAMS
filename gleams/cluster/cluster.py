@@ -176,8 +176,10 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
     ann_filename : str
         Faiss index to perform nearest neighbor queries.
     """
-    dist_filename = (ann_filename.replace('ann_', 'dist_')
-                                 .replace('.faiss', '.npz'))
+    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
+    dist_filename = (os.path.splitext(
+        os.path.basename(ann_filename))[0].replace('ann_', 'dist_'))
+    dist_filename = os.path.join(ann_dir, f'{dist_filename}.npz')
     if os.path.isfile(dist_filename):
         return
     embeddings = np.load(embeddings_filename, mmap_mode='r')
