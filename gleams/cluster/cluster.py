@@ -98,6 +98,7 @@ def build_ann_index(embeddings_filename: str) -> None:
     co.shard = True
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
+    co.usePrecomputed = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = num_embeddings
     index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
@@ -151,6 +152,7 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
     co = faiss.GpuMultipleClonerOptions()
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
+    co.usePrecomputed = False
     co.reserveVecs = x.shape[0]
     clus.train(x, faiss.index_cpu_to_all_gpus(
         faiss.IndexFlatL2(config.embedding_size), co))
@@ -241,6 +243,7 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     co.shard = True
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
+    co.usePrecomputed = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
     index = faiss.index_cpu_to_all_gpus(index_cpu, co)
