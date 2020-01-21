@@ -108,7 +108,7 @@ def build_ann_index(embeddings_filename: str) -> None:
     co.useFloat16CoarseQuantizer = False
     co.usePrecomputed = False
     co.indicesOptions = faiss.INDICES_CPU
-    co.reserveVecs = num_embeddings
+    co.reserveVecs = config.ann_max_add
     index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
     # Add the embeddings in batches to avoid exhausting the GPU memory.
     batch_size = config.ann_add_batch_size
@@ -118,6 +118,22 @@ def build_ann_index(embeddings_filename: str) -> None:
         batch_stop = min(batch_start + batch_size, num_embeddings)
         index_gpu.add_with_ids(embeddings[batch_start:batch_stop],
                                np.arange(batch_start, batch_stop))
+        if index_gpu.ntotal > config.ann_max_add:
+            logger.debug('Flush ANN indexes to CPU after %d embeddings have '
+                         'been added', batch_stop)
+            if hasattr(index_gpu, 'at'):    # Sharded index.
+                for i in range(index_gpu.count()):
+                    index_src_gpu = faiss.downcast_index(index_gpu.at(i))
+                    index_src = faiss.index_gpu_to_cpu(index_src_gpu)
+                    index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
+                    index_src_gpu.reset()
+                    index_src_gpu.reserveMemory(config.ann_max_add)
+                index_gpu.sync_with_shard_indexes()
+            else:       # Standard index.
+                index_src = faiss.index_gpu_to_cpu(index_gpu)
+                index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
+                index_gpu.reset()
+                index_gpu.reserveMemory(config.ann_max_add)
     # Combine the sharded index into a single index and save.
     logger.debug('Save the ANN index to file %s', index_filename)
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
