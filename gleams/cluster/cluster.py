@@ -61,7 +61,6 @@ def build_ann_index(embeddings_filename: str) -> None:
     # Create an ANN index using Euclidean distance for fast NN queries.
     embeddings = np.load(embeddings_filename, mmap_mode='r')
     num_embeddings = embeddings.shape[0]
-    num_gpus = faiss.get_num_gpus()
     # Figure out a decent value for the num_list hyperparameter based on the
     # number of embeddings. Rules of thumb from the Faiss wiki:
     # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
@@ -77,19 +76,28 @@ def build_ann_index(embeddings_filename: str) -> None:
             logger.warning('More than 1B embeddings to be indexed, consider '
                            'decreasing the ANN size')
     logger.info('Build the ANN index using %d GPUs (%d embeddings, %d lists)',
-                num_gpus, num_embeddings, num_list)
-    # Large datasets won't fit in the GPU memory, so we first compute coarse
-    # cluster centroids using a subset of the data on the GPU.
-    num_samples = min(num_embeddings, int(max(10e5, 256 * num_list)))
-    logger.debug('Approximate the ANN index cluster centroids using %d '
-                 'embeddings', num_samples)
-    embeddings_sample = embeddings[np.random.choice(
-        embeddings.shape[0], num_samples, False)]
-    index_cpu = faiss.IndexIVFFlat(
-        _build_quantizer(embeddings_sample, num_list),
-        config.embedding_size, num_list, faiss.METRIC_L2)
-    # Finish training on the CPU.
-    index_cpu.train(embeddings)
+                faiss.get_num_gpus(), num_embeddings, num_list)
+    if not os.path.isfile(index_filename.replace('.faiss', '.coarse.faiss')):
+        # Large datasets won't fit in the GPU memory, so we first compute
+        # coarse cluster centroids using a subset of the data on the GPU.
+        num_samples = min(num_embeddings, int(max(10e5, 256 * num_list)))
+        logger.debug('Approximate the ANN index cluster centroids using %d '
+                     'embeddings', num_samples)
+        embeddings_sample = embeddings[np.random.choice(
+            embeddings.shape[0], num_samples, False)]
+        coarse_quantizer = _build_quantizer(embeddings_sample, num_list)
+        index_cpu = faiss.IndexIVFFlat(
+            coarse_quantizer, config.embedding_size, num_list, faiss.METRIC_L2)
+        coarse_quantizer.this.disown()
+        index_cpu.own_fields = True
+        # Finish training on the CPU (CPU is batched automatically).
+        index_cpu.train(embeddings)
+        faiss.write_index(
+            index_cpu, index_filename.replace('.faiss', '.coarse.faiss'))
+    else:
+        logger.debug('Load the cluster centroids from file %s', index_filename)
+        index_cpu = faiss.read_index(
+            index_filename.replace('.faiss', '.coarse.faiss'))
     # Add the embeddings to the index using the GPU for increased  performance.
     # Shard the GPU index over all available GPUs.
     logger.debug('Add the embeddings to the ANN index')
@@ -124,6 +132,8 @@ def build_ann_index(embeddings_filename: str) -> None:
         index_gpu.reset()
     faiss.write_index(index_cpu, index_filename)
     index_cpu.reset()
+    if os.path.isfile(index_filename.replace('.faiss', '.coarse.faiss')):
+        os.remove(index_filename.replace('.faiss', '.coarse.faiss'))
 
 
 def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
