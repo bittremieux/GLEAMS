@@ -127,13 +127,11 @@ def build_ann_index(embeddings_filename: str) -> None:
                     index_src = faiss.index_gpu_to_cpu(index_src_gpu)
                     index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
                     index_src_gpu.reset()
-                    index_src_gpu.reserveMemory(config.ann_max_add)
                 index_gpu.sync_with_shard_indexes()
             else:       # Standard index.
                 index_src = faiss.index_gpu_to_cpu(index_gpu)
                 index_src.copy_subset_to(index_cpu, 0, 0, num_embeddings)
                 index_gpu.reset()
-                index_gpu.reserveMemory(config.ann_max_add)
     # Combine the sharded index into a single index and save.
     logger.debug('Save the ANN index to file %s', index_filename)
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544

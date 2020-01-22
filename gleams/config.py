@@ -78,9 +78,9 @@ max_num_pairs_val = 500000
 # ANN indexing.
 num_probe = 1024
 num_neighbors = 50
-ann_add_batch_size = 2**9
-ann_search_batch_size = 2**9
-ann_max_add = 2**27
+ann_add_batch_size = 2**20
+ann_search_batch_size = 2**20
+ann_max_add = 2**26
 
 # DBSCAN clustering.
 # TODO: Figure out good hyperparameters.
