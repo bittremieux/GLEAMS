@@ -213,11 +213,17 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
                  config.num_neighbors)
+    if num_embeddings > np.iinfo(np.uint32).max:
+        raise OverflowError('Too many embedding indexes to fit into uint32')
     index = _load_ann_index(ann_filename)
     batch_size_query = min(num_embeddings, config.ann_search_batch_size)
-    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
-    neighbors = np.empty((num_embeddings * config.num_neighbors, 2), np.int64)
-    neighbors[:, 0] = np.repeat(np.arange(num_embeddings, dtype=np.int64),
+    distances = np.memmap(dist_filename.replace('.npz', '.dist.dat'),
+                          dtype=np.float32, mode='w+',
+                          shape=num_embeddings * config.num_neighbors)
+    neighbors = np.memmap(dist_filename.replace('.npz', '.idx.dat'),
+                          dtype=np.uint32, mode='w+',
+                          shape=(num_embeddings * config.num_neighbors, 2))
+    neighbors[:, 0] = np.repeat(np.arange(num_embeddings, dtype=np.uint32),
                                 config.num_neighbors)
     for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size_query),
                              desc='Batches processed', leave=False,
@@ -231,19 +237,27 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
                      + config.num_neighbors * (batch_stop - batch_start))
         batch_scores, batch_neighbors = index.search(
             embeddings[batch_start:batch_stop], config.num_neighbors)
-        distances[dist_start:dist_stop] = batch_scores.flatten()
-        neighbors[dist_start:dist_stop, 1] = batch_neighbors.flatten()
+        batch_scores = batch_scores.flatten()
+        batch_neighbors = batch_neighbors.flatten()
+        mask = batch_neighbors != -1
+        mask_idx = np.arange(dist_start, dist_stop)[mask]
+        distances[mask_idx] = batch_scores[mask]
+        neighbors[mask_idx, 1] = batch_neighbors[mask]
+    # Free up the memory consumed by the ANN index.
     index.reset()
+    del index
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
-    idx = ~(neighbors[:, 1] == -1)
-    neighbors, distances = neighbors[idx], distances[idx]
     pairwise_distances = sparse.csr_matrix(
         (distances, (neighbors[:, 0], neighbors[:, 1])),
         (num_embeddings, num_embeddings), np.float32, False)
+    del distances
+    del neighbors
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     sparse.save_npz(dist_filename, pairwise_distances, False)
+    os.remove(dist_filename.replace('.npz', '.dist.dat'))
+    os.remove(dist_filename.replace('.npz', '.idx.dat'))
 
 
 def _load_ann_index(index_filename: str) -> faiss.Index:
