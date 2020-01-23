@@ -277,14 +277,17 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
     logger.debug('Load the ANN index from file %s', index_filename)
     index_cpu = faiss.read_index(index_filename)
-    co = faiss.GpuMultipleClonerOptions()
-    co.shard = True
-    co.useFloat16 = True
-    co.useFloat16CoarseQuantizer = False
-    co.usePrecomputed = False
-    co.indicesOptions = faiss.INDICES_CPU
-    co.reserveVecs = index_cpu.ntotal
-    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
+    if index_cpu.ntotal <= config.ann_max_gpu_size:
+        co = faiss.GpuMultipleClonerOptions()
+        co.shard = True
+        co.useFloat16 = True
+        co.useFloat16CoarseQuantizer = False
+        co.usePrecomputed = False
+        co.indicesOptions = faiss.INDICES_CPU
+        co.reserveVecs = index_cpu.ntotal
+        index = faiss.index_cpu_to_all_gpus(index_cpu, co)
+    else:
+        index = index_cpu
     if hasattr(index, 'at'):
         for i in range(index.count()):
             faiss.downcast_index(index.at(i)).nprobe = config.num_probe

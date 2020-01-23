@@ -81,6 +81,7 @@ num_neighbors = 50
 ann_add_batch_size = 2**20
 ann_search_batch_size = 2**20
 ann_max_add = 2**26
+ann_max_gpu_size = 50000000
 
 # DBSCAN clustering.
 # TODO: Figure out good hyperparameters.
