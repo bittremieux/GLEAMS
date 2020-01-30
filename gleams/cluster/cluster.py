@@ -330,10 +330,10 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
                 np.arange(dist_start, dist_stop, config.num_neighbors)):
             neighbors_i = np.where(neighbors_mask)[0]
             neighbors_dist = ssd.cdist(embeddings[embedding_i].reshape(1, -1),
-                                       embeddings[neighbors_i])
+                                       embeddings[neighbors_i])[0]
             # Restrict to `num_neighbors` closest neighbors.
-            if len(neighbors_dist) > config.num_neighbors:
-                neighbors_dist_mask = (np.argmin(neighbors_dist)
+            if len(neighbors_i) > config.num_neighbors:
+                neighbors_dist_mask = (np.argsort(neighbors_dist)
                                        [:config.num_neighbors])
                 neighbors_i = neighbors_i[neighbors_dist_mask]
                 neighbors_dist = neighbors_dist[neighbors_dist_mask]
