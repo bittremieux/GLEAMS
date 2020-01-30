@@ -294,11 +294,11 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
                  config.num_neighbors)
     if num_embeddings > np.iinfo(np.uint32).max:
         raise OverflowError('Too many embedding indexes to fit into uint32')
-    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
     np.save(neighbors_filename.format(0),
             np.repeat(np.arange(num_embeddings, dtype=np.uint32),
                       config.num_neighbors))
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
+    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
     batch_size = min(num_embeddings, config.dist_batch_size)
     # TODO: Chunk precursor m/z's.
     precursor_mzs_arr = precursor_mzs.values.reshape((1, -1))
@@ -326,12 +326,17 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
         for (embedding_i, neighbors_mask), dist_i in zip(
                 enumerate(neighbors_masks, batch_start),
                 np.arange(dist_start, dist_stop, config.num_neighbors)):
-            # TODO: Restrict to `num_neighbors` closest neighbors.
             neighbors_i = np.where(neighbors_mask)[0]
-            distances[dist_i:dist_i + len(neighbors_i)] = \
-                ssd.cdist(embeddings[embedding_i].reshape(1, -1),
-                          embeddings[neighbors_i])
+            neighbors_dist = ssd.cdist(embeddings[embedding_i].reshape(1, -1),
+                                       embeddings[neighbors_i])
+            # Restrict to `num_neighbors` closest neighbors.
+            if len(neighbors_dist) > config.num_neighbors:
+                neighbors_dist_mask = (np.argmin(neighbors_dist)
+                                       [:config.num_neighbors])
+                neighbors_i = neighbors_i[neighbors_dist_mask]
+                neighbors_dist = neighbors_dist[neighbors_dist_mask]
             neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
+            distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
     np.save(neighbors_filename.format(1), neighbors)
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
