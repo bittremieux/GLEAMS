@@ -300,7 +300,8 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
             np.repeat(np.arange(num_embeddings, dtype=np.uint32),
                       config.num_neighbors))
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
-    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
+    distances = np.full(num_embeddings * config.num_neighbors, np.nan,
+                        np.float32)
     batch_size = min(num_embeddings, config.dist_batch_size)
     for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size),
                              desc='Batches processed', leave=False,
@@ -352,9 +353,11 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
+    mask = np.where(~np.isnan(distances))[0]
     pairwise_distances = ss.csr_matrix(
-        (distances, (np.load(neighbors_filename.format(0), mmap_mode='r'),
-                     np.load(neighbors_filename.format(1), mmap_mode='r'))),
+        (distances[mask],
+         (np.load(neighbors_filename.format(0), mmap_mode='r')[mask],
+          np.load(neighbors_filename.format(1), mmap_mode='r')[mask])),
         (num_embeddings, num_embeddings), np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     ss.save_npz(dist_filename, pairwise_distances, False)
