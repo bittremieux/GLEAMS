@@ -350,6 +350,7 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
             neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
             distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
     np.save(neighbors_filename.format(1), neighbors)
+    np.save(neighbors_filename.format('distance'), distances)
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
@@ -363,7 +364,7 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
     ss.save_npz(dist_filename, pairwise_distances, False)
     os.remove(neighbors_filename.format(0))
     os.remove(neighbors_filename.format(1))
-
+    os.remove(neighbors_filename.format('distance'))
 
 def _load_ann_index(index_filename: str) -> faiss.Index:
     """
