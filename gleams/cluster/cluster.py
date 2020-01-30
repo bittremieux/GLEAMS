@@ -290,7 +290,7 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
     embeddings = np.load(embeddings_filename, mmap_mode='r')
     num_embeddings = embeddings.shape[0]
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
-                     .squeeze())
+                     .squeeze().sort_values())
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
                  config.num_neighbors)
@@ -302,8 +302,6 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
     batch_size = min(num_embeddings, config.dist_batch_size)
-    # TODO: Chunk precursor m/z's.
-    precursor_mzs_arr = precursor_mzs.values.reshape((1, -1))
     for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size),
                              desc='Batches processed', leave=False,
                              unit='batch'):
@@ -317,18 +315,29 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
                      .values.reshape((-1, 1)))
         precursor_tol_mass = config.precursor_tol_mass
         if config.precursor_tol_mode == 'Da':
+            batch_mzs_match = precursor_mzs[precursor_mzs.between(
+                batch_mzs[0, 0] - 1.5 * precursor_tol_mass,
+                batch_mzs[-1, 0] + 1.5 * precursor_tol_mass)]
+            batch_mzs_match_arr = batch_mzs_match.values.reshape((1, -1))
             neighbors_masks = ne.evaluate(
-                'abs(batch_mzs - precursor_mzs_arr) <= precursor_tol_mass')
+                'abs(batch_mzs - batch_mzs_match_arr) <= precursor_tol_mass')
         elif config.precursor_tol_mode == 'ppm':
+            batch_mzs_match = precursor_mzs[precursor_mzs.between(
+                batch_mzs[0, 0] - 1.5 * batch_mzs[0, 0]
+                                      * precursor_tol_mass / 10**6,
+                batch_mzs[-1, 0] + 1.5 * batch_mzs[-1, 0]
+                                       * precursor_tol_mass / 10**6)]
+            batch_mzs_match_arr = batch_mzs_match.values.reshape((1, -1))
             neighbors_masks = ne.evaluate(
-                'abs(batch_mzs - precursor_mzs_arr)'
-                '   / precursor_mzs_arr * 10**6 <= precursor_tol_mass')
+                'abs(batch_mzs - batch_mzs_match_arr)'
+                '   / batch_mzs_match_arr * 10**6 <= precursor_tol_mass')
         else:
             raise ValueError('Unknown precursor tolerance filter')
-        for (embedding_i, neighbors_mask), dist_i in zip(
-                enumerate(neighbors_masks, batch_start),
+        for embedding_i, neighbors_mask, dist_i in zip(
+                precursor_mzs.index[batch_start:batch_stop], neighbors_masks,
                 np.arange(dist_start, dist_stop, config.num_neighbors)):
-            neighbors_i = np.where(neighbors_mask)[0]
+            neighbors_i = (batch_mzs_match.index[np.where(neighbors_mask)[0]]
+                           .values)
             neighbors_dist = ssd.cdist(embeddings[embedding_i].reshape(1, -1),
                                        embeddings[neighbors_i])[0]
             # Restrict to `num_neighbors` closest neighbors.

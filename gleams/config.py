@@ -76,7 +76,7 @@ max_num_pairs_val = 500000
 # Clustering settings.
 
 # Pairwise distances.
-dist_batch_size = 2**9    # 2**20
+dist_batch_size = 2**14
 precursor_tol_mass = 10
 precursor_tol_mode = 'ppm'
 num_neighbors = 50
