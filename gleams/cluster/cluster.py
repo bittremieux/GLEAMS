@@ -2,6 +2,8 @@ import logging
 import math
 import os
 
+os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
+
 import faiss
 import numexpr as ne
 import numpy as np
@@ -405,7 +407,7 @@ def cluster(distances_filename: str):
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
     dbscan = DBSCAN(config.eps, config.min_samples, 'precomputed', n_jobs=-1)
-    pairwise_distances = sparse.load_npz(distances_filename)
+    pairwise_distances = ss.load_npz(distances_filename)
     clusters = dbscan.fit_predict(pairwise_distances)
     logger.debug('%d embeddings partitioned in %d clusters',
                  pairwise_distances.shape[0], len(np.unique(clusters)))
