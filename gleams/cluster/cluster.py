@@ -3,10 +3,13 @@ import math
 import os
 
 import faiss
+import numexpr as ne
 import numpy as np
+import pandas as pd
+import scipy.sparse as ss
+import scipy.spatial.distance as ssd
 import tqdm
 from sklearn.cluster import DBSCAN
-from scipy import sparse
 
 from gleams import config
 
@@ -249,15 +252,98 @@ def compute_pairwise_distances(embeddings_filename: str, ann_filename: str)\
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
-    pairwise_distances = sparse.csr_matrix(
+    pairwise_distances = ss.csr_matrix(
         (distances, (neighbors[:, 0], neighbors[:, 1])),
         (num_embeddings, num_embeddings), np.float32, False)
     del distances
     del neighbors
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
-    sparse.save_npz(dist_filename, pairwise_distances, False)
+    ss.save_npz(dist_filename, pairwise_distances, False)
     os.remove(dist_filename.replace('.npz', '.dist.dat'))
     os.remove(dist_filename.replace('.npz', '.idx.dat'))
+
+
+def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str) -> None:
+    """
+    Compute a pairwise distance matrix for the embeddings in the given file.
+
+    Parameters
+    ----------
+    embeddings_filename : str
+        NumPy file containing the embedding vectors for which to compute
+        pairwise distances.
+    metadata_filename : str
+        Metadata file with precursor m/z information for all embeddings.
+    """
+    cluster_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'cluster')
+    if not os.path.exists(cluster_dir):
+        os.mkdir(cluster_dir)
+    dist_filename = (os.path.splitext(
+        os.path.basename(embeddings_filename))[0].replace('embed_', 'dist_'))
+    dist_filename = os.path.join(cluster_dir, f'{dist_filename}.npz')
+    neighbors_filename = (dist_filename.replace('dist_', 'neighbors_{}_')
+                                       .replace('.npz', '.npy'))
+    if os.path.isfile(dist_filename):
+        return
+    embeddings = np.load(embeddings_filename, mmap_mode='r')
+    num_embeddings = embeddings.shape[0]
+    precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
+                     .squeeze())
+    logging.info('Compute pairwise distances between neighboring embeddings '
+                 '(%d embeddings, %d neighbors)', num_embeddings,
+                 config.num_neighbors)
+    if num_embeddings > np.iinfo(np.uint32).max:
+        raise OverflowError('Too many embedding indexes to fit into uint32')
+    distances = np.empty(num_embeddings * config.num_neighbors, np.float32)
+    np.save(neighbors_filename.format(0),
+            np.repeat(np.arange(num_embeddings, dtype=np.uint32),
+                      config.num_neighbors))
+    neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
+    batch_size = min(num_embeddings, config.dist_batch_size)
+    # TODO: Chunk precursor m/z's.
+    precursor_mzs_arr = precursor_mzs.values.reshape((1, -1))
+    for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size),
+                             desc='Batches processed', leave=False,
+                             unit='batch'):
+        batch_start = batch_i
+        batch_stop = min(batch_i + batch_size, num_embeddings)
+        dist_start = batch_start * config.num_neighbors
+        dist_stop = (dist_start
+                     + config.num_neighbors * (batch_stop - batch_start))
+        # Filter neighbors on precursor m/z.
+        batch_mzs = (precursor_mzs.iloc[batch_start:batch_stop]
+                     .values.reshape((-1, 1)))
+        precursor_tol_mass = config.precursor_tol_mass
+        if config.precursor_tol_mode == 'Da':
+            neighbors_masks = ne.evaluate(
+                'abs(batch_mzs - precursor_mzs_arr) <= precursor_tol_mass')
+        elif config.precursor_tol_mode == 'ppm':
+            neighbors_masks = ne.evaluate(
+                'abs(batch_mzs - precursor_mzs_arr)'
+                '   / precursor_mzs_arr * 10**6 <= precursor_tol_mass')
+        else:
+            raise ValueError('Unknown precursor tolerance filter')
+        for (embedding_i, neighbors_mask), dist_i in zip(
+                enumerate(neighbors_masks, batch_start),
+                np.arange(dist_start, dist_stop, config.num_neighbors)):
+            # TODO: Restrict to `num_neighbors` closest neighbors.
+            neighbors_i = np.where(neighbors_mask)[0]
+            distances[dist_i:dist_i + len(neighbors_i)] = \
+                ssd.cdist(embeddings[embedding_i].reshape(1, -1),
+                          embeddings[neighbors_i])
+            neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
+    np.save(neighbors_filename.format(1), neighbors)
+    # Convert to a sparse pairwise distance matrix. This matrix might not be
+    # entirely symmetrical, but that shouldn't matter too much.
+    logger.debug('Construct pairwise distance matrix')
+    pairwise_distances = ss.csr_matrix(
+        (distances, (np.load(neighbors_filename.format(0), mmap_mode='r'),
+                     np.load(neighbors_filename.format(1), mmap_mode='r'))),
+        (num_embeddings, num_embeddings), np.float32, False)
+    logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
+    ss.save_npz(dist_filename, pairwise_distances, False)
+    os.remove(neighbors_filename.format(0))
+    os.remove(neighbors_filename.format(1))
 
 
 def _load_ann_index(index_filename: str) -> faiss.Index:
