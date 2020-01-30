@@ -296,9 +296,6 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
                  config.num_neighbors)
     if num_embeddings > np.iinfo(np.uint32).max:
         raise OverflowError('Too many embedding indexes to fit into uint32')
-    np.save(neighbors_filename.format(0),
-            np.repeat(np.arange(num_embeddings, dtype=np.uint32),
-                      config.num_neighbors))
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.full(num_embeddings * config.num_neighbors, np.nan,
                         np.float32)
@@ -349,16 +346,19 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
                 neighbors_dist = neighbors_dist[neighbors_dist_mask]
             neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
             distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
-    np.save(neighbors_filename.format(1), neighbors)
-    np.save(neighbors_filename.format('distance'), distances)
+    mask = np.where(~np.isnan(distances))[0]
+    np.save(neighbors_filename.format(1), neighbors[mask])
+    np.save(neighbors_filename.format('distance'), distances[mask])
+    np.save(neighbors_filename.format(0),
+            np.repeat(np.arange(num_embeddings, dtype=np.uint32),
+                      config.num_neighbors)[mask])
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
-    mask = np.where(~np.isnan(distances))[0]
     pairwise_distances = ss.csr_matrix(
-        (distances[mask],
-         (np.load(neighbors_filename.format(0), mmap_mode='r')[mask],
-          np.load(neighbors_filename.format(1), mmap_mode='r')[mask])),
+        (np.load(neighbors_filename.format('distance'), mmap_mode='r'),
+         (np.load(neighbors_filename.format(0), mmap_mode='r'),
+          np.load(neighbors_filename.format(1), mmap_mode='r'))),
         (num_embeddings, num_embeddings), np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     ss.save_npz(dist_filename, pairwise_distances, False)
