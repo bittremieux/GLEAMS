@@ -163,28 +163,13 @@ with DAG('gleams', default_args=default_args,
     embed_filename = os.path.join(embed_dir, os.path.splitext(
         os.path.basename(config.metadata_filename))[0]
                                   .replace('metadata_', 'embed_'))
-    t_build_ann_index = PythonOperator(
-        task_id='build_ann_index',
-        python_callable=cluster.build_ann_index,
-        op_kwargs={'embeddings_filename': embed_filename}
-    )
-    ann_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'ann')
-    ann_filename = os.path.splitext(
-        os.path.basename(embed_filename))[0].replace('embed_', 'ann_')
-    ann_filename = os.path.join(ann_dir, f'{ann_filename}.faiss')
-    t_pairwise_dist = PythonOperator(
-        task_id='compute_pairwise_distances',
-        python_callable=cluster.compute_pairwise_distances,
-        op_kwargs={'embeddings_filename': embed_filename,
-                   'ann_filename': ann_filename}
-    )
-    dist_filename = (ann_filename.replace('ann_', 'dist_')
-                                 .replace('.faiss', '.npz'))
-    t_cluster = PythonOperator(
-        task_id='compute_pairwise_distances',
-        python_callable=cluster.cluster,
-        op_kwargs={'distances_filename': dist_filename}
-    )
+    # dist_filename = (ann_filename.replace('ann_', 'dist_')
+    #                              .replace('.faiss', '.npz'))
+    # t_cluster = PythonOperator(
+    #     task_id='compute_pairwise_distances',
+    #     python_callable=cluster.cluster,
+    #     op_kwargs={'distances_filename': dist_filename}
+    # )
 
     t_metadata >> t_split_feat
     t_download >> t_enc_feat
@@ -196,6 +181,3 @@ with DAG('gleams', default_args=default_args,
      t_pairs_pos['val'], t_pairs_neg['val']] >> t_train
     t_train >> t_embed
     t_embed >> t_combine_embed
-    t_combine_embed >> t_build_ann_index
-    t_build_ann_index >> t_pairwise_dist
-    t_pairwise_dist >> t_cluster
