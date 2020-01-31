@@ -350,7 +350,7 @@ def compute_pairwise_distances2(embeddings_filename: str, metadata_filename: str
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
     np.save(neighbors_filename.format(0),
-            np.repeat(np.arange(num_embeddings, dtype=np.uint32),
+            np.repeat(np.asarray(precursor_mzs.index, dtype=np.uint32),
                       config.num_neighbors)[mask])
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
