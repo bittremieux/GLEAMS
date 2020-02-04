@@ -84,12 +84,14 @@ def compute_pairwise_distances(embeddings_filename: str,
                 '   / batch_mzs_match_arr * 10**6 <= precursor_tol_mass')
         else:
             raise ValueError('Unknown precursor tolerance filter')
-        for embedding_i, neighbors_mask, dist_i in zip(
-                precursor_mzs.index[batch_start:batch_stop], neighbors_masks,
-                np.arange(dist_start, dist_stop, config.num_neighbors)):
-            _set_nn(embeddings, neighbors, distances, embedding_i,
-                    batch_mzs_match.index[np.where(neighbors_mask)[0]].values,
-                    dist_i)
+        neighbors_idx = nb.typed.List()
+        for neighbors_mask in neighbors_masks:
+            neighbors_idx.append(
+                batch_mzs_match.index[np.where(neighbors_mask)[0]].values)
+        _set_nn_batch(embeddings, neighbors, distances,
+                      precursor_mzs.index[batch_start:batch_stop].values,
+                      neighbors_idx,
+                      np.arange(dist_start, dist_stop, config.num_neighbors))
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
@@ -109,6 +111,36 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format(0))
     os.remove(neighbors_filename.format(1))
     os.remove(neighbors_filename.format('distance'))
+
+
+@nb.njit(parallel=True)
+def _set_nn_batch(embeddings: np.ndarray, neighbors: np.ndarray,
+                  distances: np.ndarray, embedding_idx: np.ndarray,
+                  neighbors_idx: nb.typed.List, dist_idx: np.ndarray) -> None:
+    """
+    Assign nearest neighbor distances and indexes for all embeddings in the
+    given batch.
+
+    Parameters
+    ----------
+    embeddings : np.ndarray
+        Matrix containing the embeddings.
+    neighbors : np.ndarray
+        Vector with neighbor indexes to be assigned.
+    distances : np.ndarray
+        Vector with neighbor distances to be assigned.
+    embedding_idx : np.ndarray
+        The indexes of the embeddings for which the nearest neighbors are
+        evaluated.
+    neighbors_idx : nb.typed.List
+        A list of indexes of the nearest neighbors for each embedding to be
+        evaluated.
+    dist_idx : np.ndarray
+        The start indexes of the embeddings in the neighbor vectors.
+    """
+    for i in nb.prange(len(embedding_idx)):
+        _set_nn(embeddings, neighbors, distances,
+                embedding_idx[i], neighbors_idx[i], dist_idx[i])
 
 
 @nb.njit
