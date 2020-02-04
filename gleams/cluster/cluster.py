@@ -3,11 +3,11 @@ import os
 
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
+import numba as nb
 import numexpr as ne
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
-import scipy.spatial.distance as ssd
 import tqdm
 from sklearn.cluster import DBSCAN
 
@@ -87,18 +87,9 @@ def compute_pairwise_distances(embeddings_filename: str,
         for embedding_i, neighbors_mask, dist_i in zip(
                 precursor_mzs.index[batch_start:batch_stop], neighbors_masks,
                 np.arange(dist_start, dist_stop, config.num_neighbors)):
-            neighbors_i = (batch_mzs_match.index[np.where(neighbors_mask)[0]]
-                           .values)
-            neighbors_dist = ssd.cdist(embeddings[embedding_i].reshape(1, -1),
-                                       embeddings[neighbors_i])[0]
-            # Restrict to `num_neighbors` closest neighbors.
-            if len(neighbors_i) > config.num_neighbors:
-                neighbors_dist_mask = (np.argsort(neighbors_dist)
-                                       [:config.num_neighbors])
-                neighbors_i = neighbors_i[neighbors_dist_mask]
-                neighbors_dist = neighbors_dist[neighbors_dist_mask]
-            neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
-            distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
+            _set_nn(embeddings, neighbors, distances, embedding_i,
+                    batch_mzs_match.index[np.where(neighbors_mask)[0]].values,
+                    dist_i)
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
@@ -118,6 +109,73 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format(0))
     os.remove(neighbors_filename.format(1))
     os.remove(neighbors_filename.format('distance'))
+
+
+@nb.njit
+def _set_nn(embeddings: np.ndarray, neighbors: np.ndarray,
+            distances: np.ndarray, embedding_i: int, neighbors_i: np.ndarray,
+            dist_i: int) -> None:
+    """
+    Assign nearest neighbor distances and indexes.
+
+    Parameters
+    ----------
+    embeddings : np.ndarray
+        Matrix containing the embeddings.
+    neighbors : np.ndarray
+        Vector with neighbor indexes to be assigned.
+    distances : np.ndarray
+        Vector with neighbor distances to be assigned.
+    embedding_i : int
+        The index of the embedding for which the nearest neighbors are
+        evaluated.
+    neighbors_i : np.ndarray
+        The indexes of the nearest neighbors for the embedding to be evaluated.
+    dist_i : int
+        The start index of the embedding in the neighbor vectors.
+    """
+    # Upcast to avoid float32 precision errors.
+    neighbors_dist = _cdist(
+        embeddings[embedding_i].reshape(1, -1).astype(np.float64),
+        embeddings[neighbors_i].astype(np.float64))[0]
+    # Restrict to `num_neighbors` closest neighbors.
+    if len(neighbors_i) > config.num_neighbors:
+        neighbors_dist_mask = (np.argsort(neighbors_dist)
+                               [:config.num_neighbors])
+        neighbors_i = neighbors_i[neighbors_dist_mask]
+        neighbors_dist = neighbors_dist[neighbors_dist_mask]
+    neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
+    distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
+
+
+@nb.njit
+def _cdist(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """
+    Compute the Eucliedean distance between each pair of the two collections of
+    inputs.
+
+    Similar to https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html
+    using Euclidean distance.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        An $m_X$ by $n$ array of original observations in an $n$-dimensional
+        space. Inputs should be float64 type.
+    Y : np.ndarray
+        An $m_Y$ by $n$ array of original observations in an $n$-dimensional
+        space. Inputs should be float64 type.
+
+    Returns
+    -------
+    np.ndarray
+        A $m_X$ by $m_Y$ distance matrix is returned. For each $i$ and $j$, the
+        Euclidean distance `dist(u=XA[i], v=XB[j])` is computed and stored in
+        the $ij$th entry.
+    """
+    XX, YY = (X ** 2).sum(axis=1), (Y ** 2).sum(axis=1)
+    dist = - 2 * np.dot(X, Y.T) + XX + YY
+    return np.sqrt(np.maximum(dist, 0, dist))
 
 
 def cluster(distances_filename: str):
