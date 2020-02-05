@@ -62,32 +62,10 @@ def compute_pairwise_distances(embeddings_filename: str,
         dist_stop = (dist_start
                      + config.num_neighbors * (batch_stop - batch_start))
         # Filter neighbors on precursor m/z.
-        batch_mzs = (precursor_mzs.iloc[batch_start:batch_stop]
-                     .values.reshape((-1, 1)))
-        precursor_tol_mass = config.precursor_tol_mass
-        if config.precursor_tol_mode == 'Da':
-            batch_mzs_match = precursor_mzs[precursor_mzs.between(
-                batch_mzs[0, 0] - 1.5 * precursor_tol_mass,
-                batch_mzs[-1, 0] + 1.5 * precursor_tol_mass)]
-            batch_mzs_match_arr = batch_mzs_match.values.reshape((1, -1))
-            neighbors_masks = ne.evaluate(
-                'abs(batch_mzs - batch_mzs_match_arr) <= precursor_tol_mass')
-        elif config.precursor_tol_mode == 'ppm':
-            batch_mzs_match = precursor_mzs[precursor_mzs.between(
-                batch_mzs[0, 0] - 1.5 * batch_mzs[0, 0]
-                                      * precursor_tol_mass / 10**6,
-                batch_mzs[-1, 0] + 1.5 * batch_mzs[-1, 0]
-                                       * precursor_tol_mass / 10**6)]
-            batch_mzs_match_arr = batch_mzs_match.values.reshape((1, -1))
-            neighbors_masks = ne.evaluate(
-                'abs(batch_mzs - batch_mzs_match_arr)'
-                '   / batch_mzs_match_arr * 10**6 <= precursor_tol_mass')
-        else:
-            raise ValueError('Unknown precursor tolerance filter')
-        neighbors_idx = nb.typed.List()
-        for neighbors_mask in neighbors_masks:
-            neighbors_idx.append(
-                batch_mzs_match.index[np.where(neighbors_mask)[0]].values)
+        neighbors_idx = _get_neighbors_idx(
+            precursor_mzs, precursor_mzs.iloc[batch_start:batch_stop]
+                                        .values.reshape((-1, 1)))
+        # Compute nearest neighbor distances.
         _set_nn_batch(embeddings, neighbors, distances,
                       precursor_mzs.index[batch_start:batch_stop].values,
                       neighbors_idx,
@@ -111,6 +89,47 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format(0))
     os.remove(neighbors_filename.format(1))
     os.remove(neighbors_filename.format('distance'))
+
+
+def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> nb.typed.List:
+    """
+    Filter nearest neighbor candidates on precursor m/z.
+
+    Parameters
+    ----------
+    mzs : pd.Series
+        The precursor m/z's of the nearest neighbor candidates.
+    batch_mzs : np.ndarray
+        The precursor m/z's for which nearest neighbor candidates will be
+        selected.
+
+    Returns
+    -------
+    nb.typed.List
+        A list of NumPy arrays with the indexes of the nearest neighbor
+        candidates for each item.
+    """
+    precursor_tol_mass = config.precursor_tol_mass
+    if config.precursor_tol_mode == 'Da':
+        min_mz = batch_mzs[0, 0] - 1.1 * precursor_tol_mass
+        max_mz = batch_mzs[-1, 0] + 1.1 * precursor_tol_mass
+        mz_filter = 'abs(batch_mzs - match_mzs) < precursor_tol_mass'
+    elif config.precursor_tol_mode == 'ppm':
+        min_mz = (batch_mzs[0, 0]
+                  - 1.1 * batch_mzs[0, 0] * precursor_tol_mass / 10**6)
+        max_mz = (batch_mzs[-1, 0]
+                  + 1.1 * batch_mzs[-1, 0] * precursor_tol_mass / 10**6)
+        mz_filter = ('abs(batch_mzs - match_mzs) / match_mzs * 10**6 '
+                     '< precursor_tol_mass')
+    else:
+        raise ValueError('Unknown precursor tolerance filter')
+    match_mzs = mzs[mzs.between(min_mz, max_mz)]
+    match_mzs_arr = match_mzs.values.reshape((1, -1))
+    neighbors_idx = nb.typed.List()
+    for neighbors_mask in ne.evaluate(mz_filter):
+        neighbors_idx.append(
+            match_mzs.index[np.where(neighbors_mask)[0]].values)
+    return neighbors_idx
 
 
 @nb.njit(parallel=True)
