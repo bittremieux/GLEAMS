@@ -76,10 +76,14 @@ max_num_pairs_val = 500000
 # Clustering settings.
 
 # Pairwise distances.
-dist_batch_size = 2**14
 precursor_tol_mass = 10
 precursor_tol_mode = 'ppm'
+mz_interval = 50
+batch_size_add = 2**14
+batch_size_dist = 2**11
 num_neighbors = 50
+num_neighbors_ann = 1024
+num_probe = 1024
 
 # DBSCAN clustering.
 # TODO: Figure out good hyperparameters.

@@ -1,9 +1,11 @@
 import logging
+import math
 import os
+from typing import List
 
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
-import numba as nb
+import faiss
 import numexpr as ne
 import numpy as np
 import pandas as pd
@@ -15,6 +17,28 @@ from gleams import config
 
 
 logger = logging.getLogger('gleams')
+
+
+def _check_ann_config() -> None:
+    """
+    Make sure that the configuration values adhere to the limitations imposed
+    by running Faiss on a GPU.
+    GPU indexes can only handle maximum 1024 probes and neighbors.
+    https://github.com/facebookresearch/faiss/wiki/Faiss-on-the-GPU#limitations
+    """
+    if config.num_probe > 1024:
+        logger.warning('Using num_probe=1024 (maximum supported value for '
+                       'GPU-enabled ANN indexing), %d was supplied',
+                       config.num_probe)
+        config.num_probe = 1024
+    if config.num_neighbors > 1024:
+        logger.warning('Using num_neighbours=1024 (maximum supported value '
+                       'for GPU-enabled ANN indexing), %d was supplied',
+                       config.num_neighbors)
+        config.num_neighbours = 1024
+
+
+_check_ann_config()
 
 
 def compute_pairwise_distances(embeddings_filename: str,
@@ -33,6 +57,12 @@ def compute_pairwise_distances(embeddings_filename: str,
     cluster_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'cluster')
     if not os.path.exists(cluster_dir):
         os.mkdir(cluster_dir)
+    ann_dir = os.path.join(cluster_dir, 'ann')
+    if not os.path.exists(ann_dir):
+        os.mkdir(ann_dir)
+    index_filename = os.path.splitext(
+        os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_')
+    index_filename = os.path.join(ann_dir, index_filename + '_{}.faiss')
     dist_filename = (os.path.splitext(
         os.path.basename(embeddings_filename))[0].replace('embed_', 'dist_'))
     dist_filename = os.path.join(cluster_dir, f'{dist_filename}.npz')
@@ -41,9 +71,16 @@ def compute_pairwise_distances(embeddings_filename: str,
     if os.path.isfile(dist_filename):
         return
     embeddings = np.load(embeddings_filename, mmap_mode='r')
-    num_embeddings = embeddings.shape[0]
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
                      .squeeze().sort_values())
+    min_mz, max_mz = precursor_mzs.min(), precursor_mzs.max()
+    mz_splits = np.arange(math.floor(min_mz / 100) * 100,
+                          math.ceil(max_mz / 100) * 100,
+                          config.mz_interval)
+    # Create the ANN indexes (if this hasn't been done yet).
+    _build_ann_index(index_filename, embeddings, precursor_mzs, mz_splits)
+    # Calculate pairwise distances.
+    num_embeddings = embeddings.shape[0]
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
                  config.num_neighbors)
@@ -52,30 +89,43 @@ def compute_pairwise_distances(embeddings_filename: str,
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.full(num_embeddings * config.num_neighbors, np.nan,
                         np.float32)
-    batch_size = min(num_embeddings, config.dist_batch_size)
-    for batch_i in tqdm.tqdm(range(0, num_embeddings, batch_size),
-                             desc='Batches processed', leave=False,
-                             unit='batch'):
-        batch_start = batch_i
-        batch_stop = min(batch_i + batch_size, num_embeddings)
-        dist_start = batch_start * config.num_neighbors
-        dist_stop = (dist_start
-                     + config.num_neighbors * (batch_stop - batch_start))
-        # Filter neighbors on precursor m/z.
-        neighbors_idx = _get_neighbors_idx(
-            precursor_mzs, precursor_mzs.iloc[batch_start:batch_stop]
-                                        .values.reshape((-1, 1)))
-        # Compute nearest neighbor distances.
-        _set_nn_batch(embeddings, neighbors, distances,
-                      precursor_mzs.index[batch_start:batch_stop].values,
-                      neighbors_idx,
-                      np.arange(dist_start, dist_stop, config.num_neighbors))
+    with tqdm.tqdm(desc='Embeddings processed', unit='embedding',
+                   total=num_embeddings) as progressbar:
+        for mz in mz_splits:
+            index = _load_ann_index(index_filename.format(mz))
+            interval_ids = precursor_mzs[precursor_mzs.between(
+                mz, mz + config.mz_interval)].index.values
+            interval_len = len(interval_ids)
+            batch_size = min(interval_len, config.batch_size_dist)
+            for batch_start in range(0, interval_len, batch_size):
+                batch_stop = min(batch_start + batch_size, interval_len)
+                batch_ids = interval_ids[batch_start:batch_stop]
+                # Find nearest neighbors using ANN index searching.
+                nn_dists, nn_idx_ann = index.search(
+                    embeddings[batch_ids], config.num_neighbors_ann)
+                # Filter the neighbors based on the precursor m/z tolerance.
+                nn_idx_mz = _get_neighbors_idx(
+                    precursor_mzs, (precursor_mzs.loc[batch_ids]
+                                    .values.reshape((-1, 1))))
+                for embedding, idx_ann, idx_mz, dists in zip(
+                        batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
+                    mask = np.intersect1d(idx_ann[np.where(idx_ann != -1)[0]],
+                                          idx_mz, True, True)[1]
+                    # Restrict to the `num_neighbors` closest neighbors.
+                    if len(mask) > config.num_neighbors:
+                        mask = mask[np.argsort(dists[mask])
+                                    [:config.num_neighbors]]
+                    dist_i = embedding * config.num_neighbors
+                    distances[dist_i:dist_i + len(mask)] = dists[mask]
+                    neighbors[dist_i:dist_i + len(mask)] = idx_ann[mask]
+                progressbar.update(batch_stop - batch_start)
+            index.reset()
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
     np.save(neighbors_filename.format(0),
-            np.repeat(np.asarray(precursor_mzs.index, dtype=np.uint32),
-                      config.num_neighbors)[mask])
+            np.repeat(np.asarray(precursor_mzs.index.sort_values(),
+                                 dtype=np.uint32), config.num_neighbors)[mask])
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
@@ -91,7 +141,178 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format('distance'))
 
 
-def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> nb.typed.List:
+def _build_ann_index(index_filename: str, embeddings: np.ndarray,
+                     precursor_mzs: pd.Series, mz_splits: np.ndarray) -> None:
+    """
+    Create ANN indexes for the given embedding vectors.
+
+    Vectors will be split over multiple ANN indexes based on the given m/z
+    interval.
+
+    Parameters
+    ----------
+    index_filename: str
+        Base file name of the ANN index. Separate indexes for the given m/z
+        splits will be created.
+    embeddings: np.ndarray
+        The embedding vectors to build the ANN index.
+    precursor_mzs: pd.Series
+        Precursor m/z's corresponding to the embedding vectors used to split
+        the embeddings over multiple ANN indexes.
+    mz_splits: np.ndarray
+        M/z splits used to create separate ANN indexes.
+    """
+    logger.debug('Use %d GPUs for ANN index construction',
+                 faiss.get_num_gpus())
+    # Create separate indexes for all embeddings with precursor m/z in the
+    # specified intervals.
+    for mz in tqdm.tqdm(mz_splits, desc='Indexes built', unit='index'):
+        if os.path.isfile(index_filename.format(mz)):
+            continue
+        # Create an ANN index using Euclidean distance for fast NN queries.
+        index_embeddings_ids = precursor_mzs[precursor_mzs.between(
+            mz, mz + config.mz_interval)].index.values
+        index_embeddings = embeddings[index_embeddings_ids]
+        num_index_embeddings = index_embeddings.shape[0]
+        # Figure out a decent value for the num_list hyperparameter based on
+        # the number of embeddings. Rules of thumb from the Faiss wiki:
+        # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
+        if num_index_embeddings < 10e5:
+            # FIXME: A brute-force index might be better if there are too few
+            #  embeddings.
+            # Ceil to avoid zero.
+            num_list = math.ceil(2**math.floor(math.log2(
+                num_index_embeddings / 39)))
+        elif num_index_embeddings < 10e6:
+            num_list = 2**16
+        elif num_index_embeddings < 10e7:
+            num_list = 2**18
+        else:
+            num_list = 2**20
+            if num_index_embeddings > 10e8:
+                logger.warning('More than 1B embeddings to be indexed, '
+                               'consider decreasing the ANN size')
+        logger.debug('Build the ANN index for precursor m/z %d–%d '
+                     '(%d embeddings, %d lists)', mz, mz + config.mz_interval,
+                     num_index_embeddings, num_list)
+        # Large datasets won't fit in the GPU memory, so we first compute
+        # coarse cluster centroids using a subset of the data on the GPU.
+        num_samples = min(num_index_embeddings, int(max(10e5, 256 * num_list)))
+        logger.debug('Determine the ANN index cluster centroids using %d '
+                     'embeddings', num_samples)
+        index_cpu = faiss.IndexIVFFlat(
+            _build_quantizer(index_embeddings[np.random.choice(
+                index_embeddings.shape[0], num_samples, False)], num_list),
+            config.embedding_size, num_list, faiss.METRIC_L2)
+        # Finish training on the CPU.
+        index_cpu.train(index_embeddings)
+        # Add the embeddings to the index using the GPU for increased
+        # performance. Shard the GPU index over all available GPUs.
+        logger.debug('Add %d embeddings to the ANN index',
+                     num_index_embeddings)
+        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
+        co = faiss.GpuMultipleClonerOptions()
+        co.shard = True
+        co.useFloat16 = True
+        co.useFloat16CoarseQuantizer = False
+        co.indicesOptions = faiss.INDICES_CPU
+        co.reserveVecs = num_index_embeddings
+        index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
+        # Add the embeddings in batches to avoid exhausting the GPU memory.
+        batch_size = config.batch_size_add
+        for batch_start in tqdm.tqdm(
+                range(0, num_index_embeddings, batch_size),
+                desc='Batches processed', leave=False, unit='batch'):
+            batch_stop = min(batch_start + batch_size, num_index_embeddings)
+            index_gpu.add_with_ids(
+                index_embeddings[batch_start:batch_stop],
+                index_embeddings_ids[batch_start:batch_stop])
+        # Combine the sharded index into a single index and save.
+        logger.debug('Save the ANN index to file %s',
+                     index_filename.format(mz))
+        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
+        if hasattr(index_gpu, 'at'):    # Sharded index.
+            for i in range(index_gpu.count()):
+                index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
+                index_src.copy_subset_to(index_cpu, 2, 0, num_index_embeddings)
+                index_gpu.at(i).reset()
+        else:       # Standard index.
+            index_src = faiss.index_gpu_to_cpu(index_gpu)
+            index_src.copy_subset_to(index_cpu, 2, 0, num_index_embeddings)
+            index_gpu.reset()
+        faiss.write_index(index_cpu, index_filename.format(mz))
+        index_cpu.reset()
+
+
+def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
+    """
+    Build a quantizer with cluster centroids for ANN indexing using the
+    Euclidean distance.
+
+    The quantizer can be constructed using a subset of all data points,
+    allowing it to be built using the GPU(s).
+
+    Parameters
+    ----------
+    x : np.ndarray
+        The data used to determine cluster centroids.
+    num_centroids : int
+        The number of centroids used by the quantizer.
+
+    Returns
+    -------
+    faiss.IndexFlatL2
+        The Faiss index to be used as quantizer.
+    """
+    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
+    clus = faiss.Clustering(config.embedding_size, num_centroids)
+    clus.max_points_per_centroid = 10000000
+    co = faiss.GpuMultipleClonerOptions()
+    co.useFloat16 = True
+    co.useFloat16CoarseQuantizer = False
+    co.reserveVecs = x.shape[0]
+    clus.train(x, faiss.index_cpu_to_all_gpus(
+        faiss.IndexFlatL2(config.embedding_size), co))
+    centroids = faiss.vector_float_to_array(clus.centroids)
+    quantizer = faiss.IndexFlatL2(config.embedding_size)
+    quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
+
+    return quantizer
+
+
+def _load_ann_index(index_filename: str) -> faiss.Index:
+    """
+    Load the ANN index from the given file and move it to the GPU(s).
+
+    Parameters
+    ----------
+    index_filename : str
+        The ANN index filename.
+
+    Returns
+    -------
+    faiss.Index
+        The Faiss `Index`.
+    """
+    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
+    logger.debug('Load the ANN index from file %s', index_filename)
+    index_cpu = faiss.read_index(index_filename)
+    co = faiss.GpuMultipleClonerOptions()
+    co.shard = True
+    co.useFloat16 = True
+    co.useFloat16CoarseQuantizer = False
+    co.indicesOptions = faiss.INDICES_CPU
+    co.reserveVecs = index_cpu.ntotal
+    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
+    if hasattr(index, 'at'):
+        for i in range(index.count()):
+            faiss.downcast_index(index.at(i)).nprobe = config.num_probe
+    else:
+        index.nprobe = config.num_probe
+    return index
+
+
+def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
     """
     Filter nearest neighbor candidates on precursor m/z.
 
@@ -105,7 +326,7 @@ def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> nb.typed.List:
 
     Returns
     -------
-    nb.typed.List
+    List
         A list of NumPy arrays with the indexes of the nearest neighbor
         candidates for each item.
     """
@@ -113,120 +334,20 @@ def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> nb.typed.List:
     if config.precursor_tol_mode == 'Da':
         min_mz = batch_mzs[0, 0] - 1.1 * precursor_tol_mass
         max_mz = batch_mzs[-1, 0] + 1.1 * precursor_tol_mass
-        mz_filter = 'abs(batch_mzs - match_mzs) < precursor_tol_mass'
+        mz_filter = 'abs(batch_mzs - match_mzs_arr) < precursor_tol_mass'
     elif config.precursor_tol_mode == 'ppm':
         min_mz = (batch_mzs[0, 0]
                   - 1.1 * batch_mzs[0, 0] * precursor_tol_mass / 10**6)
         max_mz = (batch_mzs[-1, 0]
                   + 1.1 * batch_mzs[-1, 0] * precursor_tol_mass / 10**6)
-        mz_filter = ('abs(batch_mzs - match_mzs) / match_mzs * 10**6 '
+        mz_filter = ('abs(batch_mzs - match_mzs_arr) / match_mzs_arr * 10**6 '
                      '< precursor_tol_mass')
     else:
         raise ValueError('Unknown precursor tolerance filter')
     match_mzs = mzs[mzs.between(min_mz, max_mz)]
     match_mzs_arr = match_mzs.values.reshape((1, -1))
-    neighbors_idx = nb.typed.List()
-    for neighbors_mask in ne.evaluate(mz_filter):
-        neighbors_idx.append(
-            match_mzs.index[np.where(neighbors_mask)[0]].values)
-    return neighbors_idx
-
-
-@nb.njit(parallel=True)
-def _set_nn_batch(embeddings: np.ndarray, neighbors: np.ndarray,
-                  distances: np.ndarray, embedding_idx: np.ndarray,
-                  neighbors_idx: nb.typed.List, dist_idx: np.ndarray) -> None:
-    """
-    Assign nearest neighbor distances and indexes for all embeddings in the
-    given batch.
-
-    Parameters
-    ----------
-    embeddings : np.ndarray
-        Matrix containing the embeddings.
-    neighbors : np.ndarray
-        Vector with neighbor indexes to be assigned.
-    distances : np.ndarray
-        Vector with neighbor distances to be assigned.
-    embedding_idx : np.ndarray
-        The indexes of the embeddings for which the nearest neighbors are
-        evaluated.
-    neighbors_idx : nb.typed.List
-        A list of indexes of the nearest neighbors for each embedding to be
-        evaluated.
-    dist_idx : np.ndarray
-        The start indexes of the embeddings in the neighbor vectors.
-    """
-    for i in nb.prange(len(embedding_idx)):
-        _set_nn(embeddings, neighbors, distances,
-                embedding_idx[i], neighbors_idx[i], dist_idx[i])
-
-
-@nb.njit
-def _set_nn(embeddings: np.ndarray, neighbors: np.ndarray,
-            distances: np.ndarray, embedding_i: int, neighbors_i: np.ndarray,
-            dist_i: int) -> None:
-    """
-    Assign nearest neighbor distances and indexes.
-
-    Parameters
-    ----------
-    embeddings : np.ndarray
-        Matrix containing the embeddings.
-    neighbors : np.ndarray
-        Vector with neighbor indexes to be assigned.
-    distances : np.ndarray
-        Vector with neighbor distances to be assigned.
-    embedding_i : int
-        The index of the embedding for which the nearest neighbors are
-        evaluated.
-    neighbors_i : np.ndarray
-        The indexes of the nearest neighbors for the embedding to be evaluated.
-    dist_i : int
-        The start index of the embedding in the neighbor vectors.
-    """
-    # Upcast to avoid float32 precision errors.
-    neighbors_dist = _cdist(
-        embeddings[embedding_i].reshape(1, -1).astype(np.float64),
-        embeddings[neighbors_i].astype(np.float64))[0]
-    # Restrict to `num_neighbors` closest neighbors.
-    if len(neighbors_i) > config.num_neighbors:
-        neighbors_dist_mask = (np.argsort(neighbors_dist)
-                               [:config.num_neighbors])
-        neighbors_i = neighbors_i[neighbors_dist_mask]
-        neighbors_dist = neighbors_dist[neighbors_dist_mask]
-    neighbors[dist_i:dist_i + len(neighbors_i)] = neighbors_i
-    distances[dist_i:dist_i + len(neighbors_i)] = neighbors_dist
-
-
-@nb.njit
-def _cdist(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-    """
-    Compute the Eucliedean distance between each pair of the two collections of
-    inputs.
-
-    Similar to https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html
-    using Euclidean distance.
-
-    Parameters
-    ----------
-    X : np.ndarray
-        An $m_X$ by $n$ array of original observations in an $n$-dimensional
-        space. Inputs should be float64 type.
-    Y : np.ndarray
-        An $m_Y$ by $n$ array of original observations in an $n$-dimensional
-        space. Inputs should be float64 type.
-
-    Returns
-    -------
-    np.ndarray
-        A $m_X$ by $m_Y$ distance matrix is returned. For each $i$ and $j$, the
-        Euclidean distance `dist(u=XA[i], v=XB[j])` is computed and stored in
-        the $ij$th entry.
-    """
-    XX, YY = (X ** 2).sum(axis=1), (Y ** 2).sum(axis=1)
-    dist = - 2 * np.dot(X, Y.T) + XX + YY
-    return np.sqrt(np.maximum(dist, 0, dist))
+    return [match_mzs.index[np.where(neighbors_mask)[0]].values
+            for neighbors_mask in ne.evaluate(mz_filter)]
 
 
 def cluster(distances_filename: str):
