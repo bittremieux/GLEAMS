@@ -74,9 +74,10 @@ def compute_pairwise_distances(embeddings_filename: str,
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
                      .squeeze().sort_values())
     min_mz, max_mz = precursor_mzs.min(), precursor_mzs.max()
-    mz_splits = np.arange(math.floor(min_mz / 100) * 100,
-                          math.ceil(max_mz / 100) * 100,
-                          config.mz_interval)
+    mz_splits = np.arange(
+        math.floor(min_mz / config.mz_interval) * config.mz_interval,
+        math.ceil(max_mz / config.mz_interval) * config.mz_interval,
+        config.mz_interval)
     # Create the ANN indexes (if this hasn't been done yet).
     _build_ann_index(index_filename, embeddings, precursor_mzs, mz_splits)
     # Calculate pairwise distances.
