@@ -93,9 +93,12 @@ def compute_pairwise_distances(embeddings_filename: str,
     with tqdm.tqdm(desc='Embeddings processed', unit='embedding',
                    total=num_embeddings) as progressbar:
         for mz in mz_splits:
+            if not os.path.isfile(index_filename.format(mz)):
+                continue
             index = _load_ann_index(index_filename.format(mz))
-            interval_ids = precursor_mzs[precursor_mzs.between(
-                mz, mz + config.mz_interval)].index.values
+            interval_ids = _get_precursor_mz_interval_ids(
+                precursor_mzs, mz, config.mz_interval,
+                config.precursor_tol_mode, config.precursor_tol_mass)
             interval_len = len(interval_ids)
             batch_size = min(interval_len, config.batch_size_dist)
             for batch_start in range(0, interval_len, batch_size):
@@ -171,14 +174,17 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         if os.path.isfile(index_filename.format(mz)):
             continue
         # Create an ANN index using Euclidean distance for fast NN queries.
-        index_embeddings_ids = precursor_mzs[precursor_mzs.between(
-            mz, mz + config.mz_interval)].index.values
+        index_embeddings_ids = _get_precursor_mz_interval_ids(
+            precursor_mzs, mz, config.mz_interval,
+            config.precursor_tol_mode, config.precursor_tol_mass)
         index_embeddings = embeddings[index_embeddings_ids]
         num_index_embeddings = index_embeddings.shape[0]
         # Figure out a decent value for the num_list hyperparameter based on
         # the number of embeddings. Rules of thumb from the Faiss wiki:
         # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
-        if num_index_embeddings < 10e5:
+        if num_index_embeddings == 0:
+            continue
+        elif num_index_embeddings < 10e5:
             # FIXME: A brute-force index might be better if there are too few
             #  embeddings.
             # Ceil to avoid zero.
@@ -296,7 +302,7 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
         The Faiss `Index`.
     """
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
-    logger.debug('Load the ANN index from file %s', index_filename)
+    # logger.debug('Load the ANN index from file %s', index_filename)
     index_cpu = faiss.read_index(index_filename)
     co = faiss.GpuMultipleClonerOptions()
     co.shard = True
@@ -307,10 +313,48 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     index = faiss.index_cpu_to_all_gpus(index_cpu, co)
     if hasattr(index, 'at'):
         for i in range(index.count()):
-            faiss.downcast_index(index.at(i)).nprobe = config.num_probe
+            faiss.downcast_index(index.at(i)).nprobe = min(
+                math.ceil(index.at(i).nlist / 2), config.num_probe)
     else:
-        index.nprobe = config.num_probe
+        index.nprobe = min(math.ceil(index.nlist / 2), config.num_probe)
     return index
+
+
+def _get_precursor_mz_interval_ids(precursor_mzs: pd.Series, start_mz: float,
+                                   mz_window: float, precursor_tol_mode: str,
+                                   precursor_tol_mass: float) -> np.ndarray:
+    """
+    Get the IDs of the embeddings falling within the specified precursor m/z
+    interval (taking a small margin for overlapping intervals into account).
+
+    Parameters
+    ----------
+    precursor_mzs : pd.Series
+        A Series with all precursor m/z's indexed by their IDs.
+    start_mz : float
+        The lower end of the m/z interval.
+    mz_window : float
+        The width of the m/z interval.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+
+    Returns
+    -------
+    np.ndarray
+        The IDS of the embeddings falling with the specified precursor m/z
+        interval.
+    """
+    if precursor_tol_mode == 'Da':
+        margin = precursor_tol_mass
+    elif precursor_tol_mode == 'ppm':
+        margin = precursor_tol_mass * start_mz / 10**6
+    else:
+        margin = 0
+    margin = max(margin, mz_window / 100)
+    return precursor_mzs[precursor_mzs.between(
+        start_mz - margin, start_mz + mz_window + margin)].index.values
 
 
 def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
