@@ -241,11 +241,13 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         if hasattr(index_gpu, 'at'):    # Sharded index.
             for i in range(index_gpu.count()):
                 index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
-                index_src.copy_subset_to(index_cpu, 2, 0, num_index_embeddings)
+                index_src.copy_subset_to(
+                    index_cpu, 0, 0, int(precursor_mzs.index.max()))
                 index_gpu.at(i).reset()
         else:       # Standard index.
             index_src = faiss.index_gpu_to_cpu(index_gpu)
-            index_src.copy_subset_to(index_cpu, 2, 0, num_index_embeddings)
+            index_src.copy_subset_to(
+                index_cpu, 0, 0, int(precursor_mzs.index.max()))
             index_gpu.reset()
         faiss.write_index(index_cpu, index_filename.format(mz))
         index_cpu.reset()
