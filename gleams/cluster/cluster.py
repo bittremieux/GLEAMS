@@ -315,8 +315,9 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     index = faiss.index_cpu_to_all_gpus(index_cpu, co)
     if hasattr(index, 'at'):
         for i in range(index.count()):
-            faiss.downcast_index(index.at(i)).nprobe = min(
-                math.ceil(index.at(i).nlist / 2), config.num_probe)
+            simple_index = faiss.downcast_index(index.at(i))
+            simple_index.nprobe = min(
+                math.ceil(simple_index.nlist / 2), config.num_probe)
     else:
         index.nprobe = min(math.ceil(index.nlist / 2), config.num_probe)
     return index
