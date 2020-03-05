@@ -356,8 +356,9 @@ def _get_precursor_mz_interval_ids(precursor_mzs: pd.Series, start_mz: float,
     else:
         margin = 0
     margin = max(margin, mz_window / 100)
-    return precursor_mzs[precursor_mzs.between(
-        start_mz - margin, start_mz + mz_window + margin)].index.values
+    idx = np.searchsorted(
+        precursor_mzs, [start_mz - margin, start_mz + mz_window + margin])
+    return precursor_mzs.index.values[idx[0]:idx[1]]
 
 
 def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
