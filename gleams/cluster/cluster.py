@@ -177,8 +177,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         index_embeddings_ids = _get_precursor_mz_interval_ids(
             precursor_mzs, mz, config.mz_interval,
             config.precursor_tol_mode, config.precursor_tol_mass)
-        index_embeddings = embeddings[index_embeddings_ids]
-        num_index_embeddings = index_embeddings.shape[0]
+        num_index_embeddings = len(index_embeddings_ids)
         # Figure out a decent value for the num_list hyperparameter based on
         # the number of embeddings. Rules of thumb from the Faiss wiki:
         # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
@@ -207,9 +206,10 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         num_samples = min(num_index_embeddings, int(max(10e5, 256 * num_list)))
         logger.debug('Determine the ANN index cluster centroids using %d '
                      'embeddings', num_samples)
+        index_embeddings = embeddings[index_embeddings_ids]
         index_cpu = faiss.IndexIVFFlat(
             _build_quantizer(index_embeddings[np.random.choice(
-                index_embeddings.shape[0], num_samples, False)], num_list),
+                num_index_embeddings, num_samples, False)], num_list),
             config.embedding_size, num_list, faiss.METRIC_L2)
         # Finish training on the CPU.
         index_cpu.train(index_embeddings)
