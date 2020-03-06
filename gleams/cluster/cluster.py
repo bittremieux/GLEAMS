@@ -1,3 +1,4 @@
+import itertools
 import logging
 import math
 import os
@@ -95,8 +96,9 @@ def compute_pairwise_distances(embeddings_filename: str,
     joblib.Parallel(faiss.get_num_gpus() * 4, 'threading')(
         joblib.delayed(_dist_mz_interval)(
             index_filename, embeddings, precursor_mzs, distances, neighbors,
-            mz) for mz in tqdm.tqdm(
-                mz_splits, desc='Precursor m/z intervals processed',
+            mz, gpu_i) for mz, gpu_i in tqdm.tqdm(
+                zip(mz_splits, itertools.cycle(range(faiss.get_num_gpus()))),
+                desc='Precursor m/z intervals processed', total=len(mz_splits),
                 unit='interval'))
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
@@ -265,7 +267,7 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
                       precursor_mzs: pd.Series, distances: np.ndarray,
-                      neighbors: np.ndarray, mz: int) -> None:
+                      neighbors: np.ndarray, mz: int, gpu_i: int) -> None:
     """
     Compute distances to the nearest neighbors for the given precursor m/z
     interval.
@@ -285,10 +287,12 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         The nearest neighbor indexes.
     mz : int
         The active precursor m/z split.
+    gpu_i : int
+        The GPU device number.
     """
     if not os.path.isfile(index_filename.format(mz)):
         return
-    index = _load_ann_index(index_filename.format(mz))
+    index = _load_ann_index(index_filename.format(mz), gpu_i)
     interval_ids = _get_precursor_mz_interval_ids(
         precursor_mzs, mz, config.mz_interval,
         config.precursor_tol_mode, config.precursor_tol_mass)
@@ -313,7 +317,7 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
     index.reset()
 
 
-def _load_ann_index(index_filename: str) -> faiss.Index:
+def _load_ann_index(index_filename: str, device: int) -> faiss.Index:
     """
     Load the ANN index from the given file and move it to the GPU(s).
 
@@ -330,13 +334,13 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
     # logger.debug('Load the ANN index from file %s', index_filename)
     index_cpu = faiss.read_index(index_filename)
-    co = faiss.GpuMultipleClonerOptions()
-    co.shard = True
+    res = faiss.StandardGpuResources()
+    co = faiss.GpuClonerOptions()
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
-    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
+    index = faiss.index_cpu_to_gpu(res, device, index_cpu, co)
     if hasattr(index, 'at'):
         for i in range(index.count()):
             simple_index = faiss.downcast_index(index.at(i))
