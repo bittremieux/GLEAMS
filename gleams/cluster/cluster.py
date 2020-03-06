@@ -6,6 +6,7 @@ from typing import List
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
 import faiss
+import numba as nb
 import numexpr as ne
 import numpy as np
 import pandas as pd
@@ -112,13 +113,9 @@ def compute_pairwise_distances(embeddings_filename: str,
                     precursor_mzs, precursor_mzs.loc[batch_ids].values)
                 for embedding, idx_ann, idx_mz, dists in zip(
                         batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
-                    mask = np.intersect1d(idx_ann[np.where(idx_ann != -1)[0]],
-                                          idx_mz, True, True)[1]
-                    # Restrict to the `num_neighbors` closest neighbors.
-                    if len(mask) > config.num_neighbors:
-                        mask = mask[np.argsort(dists[mask])
-                                    [:config.num_neighbors]]
                     dist_i = embedding * config.num_neighbors
+                    mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
+                                                 config.num_neighbors)
                     distances[dist_i:dist_i + len(mask)] = dists[mask]
                     neighbors[dist_i:dist_i + len(mask)] = idx_ann[mask]
                 progressbar.update(batch_stop - batch_start)
@@ -395,6 +392,46 @@ def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
     match_mzs_idx = mzs.index.values[match_idx[0]:match_idx[1]]
     match_mzs_arr = mzs.values[match_idx[0]:match_idx[1]].reshape((1, -1))
     return [match_mzs_idx[mask] for mask in ne.evaluate(mz_filter)]
+
+
+@nb.njit
+def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
+                          max_neighbors: int) -> np.ndarray:
+    """
+    Find the intersection between identifiers from ANN filtering and precursor
+    m/z filtering.
+
+    Parameters
+    ----------
+    idx_ann : np.ndarray
+        Identifiers from ANN filtering.
+    idx_mz : np.ndarray
+        Identifiers from precursor m/z filtering.
+    max_neighbors : int
+        The maximum number of best matching neighbors to retain.
+
+    Returns
+    -------
+    np.ndarray
+        A mask to select the joint identifiers in the `idx_ann` array.
+    """
+    idx_mz, i_mz = np.sort(idx_mz), 0
+    idx_ann_order = np.argsort(idx_ann)
+    idx_ann_intersect = []
+    for i_order, i_ann in enumerate(idx_ann_order):
+        if idx_ann[i_ann] != -1:
+            while i_mz < len(idx_mz) and idx_mz[i_mz] < idx_ann[i_ann]:
+                i_mz += 1
+            if i_mz == len(idx_mz):
+                break
+            if idx_ann[i_ann] == idx_mz[i_mz]:
+                idx_ann_intersect.append(i_order)
+                i_mz += 1
+    # FIXME: Sorting could be avoided here using np.argpartition, but this is
+    #        currently not supported by Numba.
+    #        https://github.com/numba/numba/issues/2445
+    return (np.sort(idx_ann_order[np.asarray(idx_ann_intersect)])
+            [:max_neighbors])
 
 
 def cluster(distances_filename: str):
