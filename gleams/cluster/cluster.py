@@ -93,7 +93,7 @@ def compute_pairwise_distances(embeddings_filename: str,
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.full(num_embeddings * config.num_neighbors, np.nan,
                         np.float32)
-    joblib.Parallel(faiss.get_num_gpus() * 4, 'threading')(
+    joblib.Parallel(faiss.get_num_gpus() * 2, 'threading')(
         joblib.delayed(_dist_mz_interval)(
             index_filename, embeddings, precursor_mzs, distances, neighbors,
             mz, gpu_i) for mz, gpu_i in tqdm.tqdm(
