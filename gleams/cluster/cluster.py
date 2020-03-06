@@ -6,6 +6,7 @@ from typing import List
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
 import faiss
+import joblib
 import numba as nb
 import numexpr as ne
 import numpy as np
@@ -91,35 +92,12 @@ def compute_pairwise_distances(embeddings_filename: str,
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.full(num_embeddings * config.num_neighbors, np.nan,
                         np.float32)
-    with tqdm.tqdm(desc='Embeddings processed', unit='embedding',
-                   total=num_embeddings) as progressbar:
-        for mz in mz_splits:
-            if not os.path.isfile(index_filename.format(mz)):
-                continue
-            index = _load_ann_index(index_filename.format(mz))
-            interval_ids = _get_precursor_mz_interval_ids(
-                precursor_mzs, mz, config.mz_interval,
-                config.precursor_tol_mode, config.precursor_tol_mass)
-            interval_len = len(interval_ids)
-            batch_size = min(interval_len, config.batch_size_dist)
-            for batch_start in range(0, interval_len, batch_size):
-                batch_stop = min(batch_start + batch_size, interval_len)
-                batch_ids = interval_ids[batch_start:batch_stop]
-                # Find nearest neighbors using ANN index searching.
-                nn_dists, nn_idx_ann = index.search(
-                    embeddings[batch_ids], config.num_neighbors_ann)
-                # Filter the neighbors based on the precursor m/z tolerance.
-                nn_idx_mz = _get_neighbors_idx(
-                    precursor_mzs, precursor_mzs.loc[batch_ids].values)
-                for embedding, idx_ann, idx_mz, dists in zip(
-                        batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
-                    dist_i = embedding * config.num_neighbors
-                    mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
-                                                 config.num_neighbors)
-                    distances[dist_i:dist_i + len(mask)] = dists[mask]
-                    neighbors[dist_i:dist_i + len(mask)] = idx_ann[mask]
-                progressbar.update(batch_stop - batch_start)
-            index.reset()
+    joblib.Parallel(faiss.get_num_gpus() * 4, 'threading')(
+        joblib.delayed(_dist_mz_interval)(
+            index_filename, embeddings, precursor_mzs, distances, neighbors,
+            mz) for mz in tqdm.tqdm(
+                mz_splits, desc='Precursor m/z intervals processed',
+                unit='interval'))
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
@@ -283,6 +261,56 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
     quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
 
     return quantizer
+
+
+def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
+                      precursor_mzs: pd.Series, distances: np.ndarray,
+                      neighbors: np.ndarray, mz: int) -> None:
+    """
+    Compute distances to the nearest neighbors for the given precursor m/z
+    interval.
+
+    Parameters
+    ----------
+    index_filename: str
+        Base file name of the ANN index. The specific index for the given m/z
+        will be used.
+    embeddings: np.ndarray
+        The embedding vectors.
+    precursor_mzs: pd.Series
+        Precursor m/z's corresponding to the embedding vectors.
+    distances : np.ndarray
+        The nearest neighbor distances.
+    neighbors : np.ndarray
+        The nearest neighbor indexes.
+    mz : int
+        The active precursor m/z split.
+    """
+    if not os.path.isfile(index_filename.format(mz)):
+        return
+    index = _load_ann_index(index_filename.format(mz))
+    interval_ids = _get_precursor_mz_interval_ids(
+        precursor_mzs, mz, config.mz_interval,
+        config.precursor_tol_mode, config.precursor_tol_mass)
+    interval_len = len(interval_ids)
+    batch_size = min(interval_len, config.batch_size_dist)
+    for batch_start in range(0, interval_len, batch_size):
+        batch_stop = min(batch_start + batch_size, interval_len)
+        batch_ids = interval_ids[batch_start:batch_stop]
+        # Find nearest neighbors using ANN index searching.
+        nn_dists, nn_idx_ann = index.search(
+            embeddings[batch_ids], config.num_neighbors_ann)
+        # Filter the neighbors based on the precursor m/z tolerance.
+        nn_idx_mz = _get_neighbors_idx(
+            precursor_mzs, precursor_mzs.loc[batch_ids].values)
+        for embedding, idx_ann, idx_mz, dists in zip(
+                batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
+            dist_i = embedding * config.num_neighbors
+            mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
+                                         config.num_neighbors)
+            distances[dist_i:dist_i + len(mask)] = dists[mask]
+            neighbors[dist_i:dist_i + len(mask)] = idx_ann[mask]
+    index.reset()
 
 
 def _load_ann_index(index_filename: str) -> faiss.Index:
