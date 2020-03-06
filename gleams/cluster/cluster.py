@@ -109,8 +109,7 @@ def compute_pairwise_distances(embeddings_filename: str,
                     embeddings[batch_ids], config.num_neighbors_ann)
                 # Filter the neighbors based on the precursor m/z tolerance.
                 nn_idx_mz = _get_neighbors_idx(
-                    precursor_mzs, (precursor_mzs.loc[batch_ids]
-                                    .values.reshape((-1, 1))))
+                    precursor_mzs, precursor_mzs.loc[batch_ids].values)
                 for embedding, idx_ann, idx_mz, dists in zip(
                         batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
                     mask = np.intersect1d(idx_ann[np.where(idx_ann != -1)[0]],
@@ -381,22 +380,21 @@ def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
     """
     precursor_tol_mass = config.precursor_tol_mass
     if config.precursor_tol_mode == 'Da':
-        min_mz = batch_mzs[0, 0] - 1.1 * precursor_tol_mass
-        max_mz = batch_mzs[-1, 0] + 1.1 * precursor_tol_mass
-        mz_filter = 'abs(batch_mzs - match_mzs_arr) < precursor_tol_mass'
+        min_mz = batch_mzs[0] - precursor_tol_mass
+        max_mz = batch_mzs[-1] + precursor_tol_mass
+        mz_filter = 'abs(batch_mzs_arr - match_mzs_arr) < precursor_tol_mass'
     elif config.precursor_tol_mode == 'ppm':
-        min_mz = (batch_mzs[0, 0]
-                  - 1.1 * batch_mzs[0, 0] * precursor_tol_mass / 10**6)
-        max_mz = (batch_mzs[-1, 0]
-                  + 1.1 * batch_mzs[-1, 0] * precursor_tol_mass / 10**6)
-        mz_filter = ('abs(batch_mzs - match_mzs_arr) / match_mzs_arr * 10**6 '
-                     '< precursor_tol_mass')
+        min_mz = batch_mzs[0] - batch_mzs[0] * precursor_tol_mass / 10**6
+        max_mz = batch_mzs[-1] + batch_mzs[-1] * precursor_tol_mass / 10**6
+        mz_filter = ('abs(batch_mzs_arr - match_mzs_arr)'
+                     '/ match_mzs_arr * 10**6 < precursor_tol_mass')
     else:
         raise ValueError('Unknown precursor tolerance filter')
-    match_mzs = mzs[mzs.between(min_mz, max_mz)]
-    match_mzs_arr = match_mzs.values.reshape((1, -1))
-    return [match_mzs.index[np.where(neighbors_mask)[0]].values
-            for neighbors_mask in ne.evaluate(mz_filter)]
+    batch_mzs_arr = batch_mzs.reshape((-1, 1))
+    match_idx = np.searchsorted(mzs, [min_mz, max_mz])
+    match_mzs_idx = mzs.index.values[match_idx[0]:match_idx[1]]
+    match_mzs_arr = mzs.values[match_idx[0]:match_idx[1]].reshape((1, -1))
+    return [match_mzs_idx[mask] for mask in ne.evaluate(mz_filter)]
 
 
 def cluster(distances_filename: str):
