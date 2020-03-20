@@ -55,9 +55,9 @@ class PairSequence(Sequence):
         logger.info('Using %d positive and negative feature pairs each from '
                     'file %s', num_pairs, filename_feat)
         idx_pos = np.random.choice(pairs_pos.shape[0], num_pairs, False)
-        self.pairs_pos = pairs_pos[idx_pos, :]
+        self.pairs_pos = pairs_pos[idx_pos]
         idx_neg = np.random.choice(pairs_neg.shape[0], num_pairs, False)
-        self.pairs_neg = pairs_neg[idx_neg, :]
+        self.pairs_neg = pairs_neg[idx_neg]
 
         self.batch_size = batch_size
         self.feature_split = feature_split
@@ -95,10 +95,10 @@ class PairSequence(Sequence):
                                          (idx + 1) * self.batch_size // 2]
         batch_pairs_neg = self.pairs_neg[idx * self.batch_size // 2:
                                          (idx + 1) * self.batch_size // 2]
-        batch_pairs_idx = np.vstack((batch_pairs_pos, batch_pairs_neg))
+        batch_pairs = np.vstack((batch_pairs_pos, batch_pairs_neg))
 
-        batch_x1 = self.features[batch_pairs_idx[:, 0]]
-        batch_x2 = self.features[batch_pairs_idx[:, 1]]
+        batch_x1 = self.features[batch_pairs[:, 0]]
+        batch_x2 = self.features[batch_pairs[:, 1]]
         batch_y = np.hstack((np.ones(len(batch_pairs_pos), np.uint8),
                              np.zeros(len(batch_pairs_neg), np.uint8)))
 
