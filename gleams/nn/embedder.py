@@ -195,14 +195,14 @@ class Embedder:
         # Precursor features are processed through two dense layers.
         precursor_input = Input((self.num_precursor_features,),
                                 name='input_precursor')
-        precursor_dense1 = (Dense(32, activation='selu',
+        precursor_dense32 = (Dense(32, activation='selu',
+                                   kernel_initializer='he_uniform',
+                                   name='precursor_dense_32')
+                             (precursor_input))
+        precursor_dense5 = (Dense(5, activation='selu',
                                   kernel_initializer='he_uniform',
-                                  name='precursor_dense_1')
-                            (precursor_input))
-        precursor_dense2 = (Dense(5, activation='selu',
-                                  kernel_initializer='he_uniform',
-                                  name='precursor_dense_2')
-                            (precursor_dense1))
+                                  name='precursor_dense_5')
+                            (precursor_dense32))
 
         filters = 30
         kernel_size = 3
@@ -213,38 +213,88 @@ class Embedder:
         # max pooling layer.
         fragment_input = Input((self.num_fragment_features,),
                                name='input_fragment')
-        fragment_input_reshape = (Reshape((self.num_fragment_features, 1),
-                                          name='fragment_input_reshape')
-                                  (fragment_input))
-        fragment_conv_1 = (Conv1D(filters, kernel_size, strides=strides,
-                                  activation='selu', name='fragment_conv_1')
-                           (fragment_input_reshape))
-        fragment_pool_1 = (MaxPooling1D(pool_size, pool_strides,
-                                        name='fragment_pool_1')
-                           (fragment_conv_1))
-        fragment_output = Flatten(name='fragment_flatten')(fragment_pool_1)
+        fragment_input_reshape =\
+            Reshape((self.num_fragment_features, 1),
+                    name='fragment_input_reshape')(fragment_input)
+        fragment_layer = fragment_input_reshape
+        # Block 1.
+        fragment_layer = Conv1D(
+            filters, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_1_conv_1')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_1_conv_2')(fragment_layer)
+        fragment_layer = MaxPooling1D(
+            pool_size, pool_strides,
+            name='fragment_block_1_pool')(fragment_layer)
+        # Block 2.
+        fragment_layer = Conv1D(
+            filters * 2, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_2_conv_1')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 2, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_2_conv_2')(fragment_layer)
+        fragment_layer = MaxPooling1D(
+            pool_size, pool_strides,
+            name='fragment_block_2_pool')(fragment_layer)
+        # Block 3.
+        fragment_layer = Conv1D(
+            filters * 4, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_3_conv_1')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 4, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_3_conv_2')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 4, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_3_conv_3')(fragment_layer)
+        fragment_layer = MaxPooling1D(
+            pool_size, pool_strides,
+            name='fragment_block_3_pool')(fragment_layer)
+        # Block 4.
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_4_conv_1')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_4_conv_2')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_4_conv_3')(fragment_layer)
+        fragment_layer = MaxPooling1D(
+            pool_size, pool_strides,
+            name='fragment_block_4_pool')(fragment_layer)
+        # Block 5.
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_5_conv_1')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_5_conv_2')(fragment_layer)
+        fragment_layer = Conv1D(
+            filters * 8, kernel_size, strides=strides, activation='selu',
+            name='fragment_block_5_conv_3')(fragment_layer)
+        fragment_layer = MaxPooling1D(
+            pool_size, pool_strides,
+            name='fragment_block_5_pool')(fragment_layer)
+        fragment_output = Flatten(name='fragment_flatten')(fragment_layer)
 
         # Reference spectra features are processed through a single
         # convolutional and max pooling layer.
         ref_spectra_input = Input((self.num_ref_spectra_features,),
                                   name='input_ref_spectra')
-        ref_spectra_input_reshape = (Reshape((
-            self.num_ref_spectra_features, 1),
-            name='ref_spectra_input_reshape')(ref_spectra_input))
-        ref_spectra_conv_1 = (Conv1D(filters, kernel_size, strides=strides,
-                                     activation='selu',
-                                     name='ref_spectra_conv_1')
-                              (ref_spectra_input_reshape))
-        ref_spectra_pool_1 = (MaxPooling1D(pool_size, pool_strides,
-                                           name='ref_spectra_pool_1')
-                              (ref_spectra_conv_1))
-        ref_spectra_output = (Flatten(name='ref_spectra_flatten')
-                              (ref_spectra_pool_1))
+        ref_spectra_dense750 = (Dense(750, activation='selu',
+                                      kernel_initializer='he_uniform',
+                                      name='ref_spectra_dense_750')
+                                (ref_spectra_input))
+        ref_spectra_output = (Dense(250, activation='selu',
+                                    kernel_initializer='he_uniform',
+                                    name='ref_spectra_output')
+                              (ref_spectra_dense750))
 
         # Combine all outputs and add a final dense layer.
         output_layer = (Dense(config.embedding_size, activation='selu',
                               kernel_initializer='he_uniform', name='output')
-                        (concatenate([precursor_dense2, fragment_output,
+                        (concatenate([precursor_dense5, fragment_output,
                                       ref_spectra_output])))
 
         return Model(inputs=[precursor_input, fragment_input,
