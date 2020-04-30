@@ -179,13 +179,41 @@ def dot(mz: np.ndarray, intensity: np.ndarray, mz_other: np.ndarray,
     float
         The dot product between both spectra.
     """
-    fragment_i, fragment_other_i, score = 0, 0, 0.
-    for fragment_i in range(len(mz)):
-        while (fragment_other_i < len(mz_other) - 1 and
-               mz_other[fragment_other_i] < mz[fragment_i] - fragment_mz_tol):
-            fragment_other_i += 1
-        if (abs(mz[fragment_i] - mz_other[fragment_other_i]) <= fragment_mz_tol
-                and fragment_other_i < len(mz_other)):
-            score += intensity[fragment_i] * intensity_other[fragment_other_i]
-            fragment_other_i += 1
+    # Find the matching peaks between both spectra.
+    peak_match_scores, peak_match_idx = [], []
+    peak_other_i = 0
+    for peak_i, (peak_mz, peak_intensity) in enumerate(zip(mz, intensity)):
+        # Advance while there is an excessive mass difference.
+        while (peak_other_i < len(mz_other) - 1 and
+               peak_mz - fragment_mz_tol > mz_other[peak_other_i]):
+            peak_other_i += 1
+        # Match the peaks within the fragment mass window if possible.
+        peak_other_window_i = peak_other_i
+        while (peak_other_window_i < len(mz_other) and
+               abs(peak_mz - (mz_other[peak_other_window_i]))
+               <= fragment_mz_tol):
+            peak_match_scores.append(
+                peak_intensity * intensity_other[peak_other_window_i])
+            peak_match_idx.append((peak_i, peak_other_window_i))
+            peak_other_window_i += 1
+
+    score = 0
+    if len(peak_match_scores) > 0:
+        # Use the most prominent peak matches to compute the score (sort in
+        # descending order).
+        peak_match_scores_arr = np.asarray(peak_match_scores)
+        peak_match_order = np.argsort(peak_match_scores_arr)[::-1]
+        peak_match_scores_arr = peak_match_scores_arr[peak_match_order]
+        peak_match_idx_arr = np.asarray(peak_match_idx)[peak_match_order]
+        peaks_used, peaks_used_other = set(), set()
+        for peak_match_score, peak_i, peak_other_i in zip(
+                peak_match_scores_arr, peak_match_idx_arr[:, 0],
+                peak_match_idx_arr[:, 1]):
+            if (peak_i not in peaks_used and
+                    peak_other_i not in peaks_used_other):
+                score += peak_match_score
+                # Make sure these peaks are not used anymore.
+                peaks_used.add(peak_i)
+                peaks_used_other.add(peak_other_i)
+
     return score
