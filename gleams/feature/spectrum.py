@@ -64,7 +64,7 @@ def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:
 
     if config.remove_precursor_tolerance is not None:
         spectrum = spectrum.remove_precursor_peak(
-            config.remove_precursor_tolerance, 'Da', 2)
+            config.remove_precursor_tolerance, 'Da')
         if not _check_spectrum_valid(spectrum.mz, min_peaks, min_mz_range):
             spectrum.is_valid = False
             spectrum.is_processed = True
