@@ -200,14 +200,14 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
             raise ValueError(f'Insufficient number of reference spectra '
                              f'({len(ref_spectra)} available, '
                              f'{num_ref_spectra} required)')
-        elif len(ref_spectra) > num_ref_spectra:
-            logger.debug('Select %d reference spectra (was %d)',
-                         len(ref_spectra), num_ref_spectra)
-            ref_spectra = random.sample(ref_spectra, num_ref_spectra)
-        logger.debug('Vectorize the reference spectra')
-        self.ref_spectra = [spec for spec in ref_spectra
-                            if (spectrum.preprocess(spec, min_mz, max_mz)
-                                .is_valid)]
+        logger.debug('Select %d valid reference spectra', num_ref_spectra)
+        np.random.shuffle(ref_spectra)
+        self.ref_spectra = []
+        for spec in ref_spectra:
+            if spectrum.preprocess(spec, min_mz, max_mz).is_valid:
+                self.ref_spectra.append(spec)
+                if len(self.ref_spectra) == num_ref_spectra:
+                    break
 
         self.feature_names = [f'ref_{i}' for i in range(len(ref_spectra))]
 
