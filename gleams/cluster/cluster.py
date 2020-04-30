@@ -177,17 +177,12 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         logger.debug('Build the ANN index for precursor m/z %d–%d '
                      '(%d embeddings, %d lists)', mz, mz + config.mz_interval,
                      num_index_embeddings, num_list)
-        # Large datasets won't fit in the GPU memory, so we first compute
-        # coarse cluster centroids using a subset of the data on the GPU.
-        num_samples = min(num_index_embeddings, int(max(10e5, 256 * num_list)))
-        logger.debug('Determine the ANN index cluster centroids using %d '
-                     'embeddings', num_samples)
+        # Large datasets won't fit in the GPU memory, so we first train the
+        # index on the CPU.
         index_embeddings = embeddings[index_embeddings_ids]
         index_cpu = faiss.IndexIVFFlat(
-            _build_quantizer(index_embeddings[np.random.choice(
-                num_index_embeddings, num_samples, False)], num_list),
+            faiss.IndexFlatL2(config.embedding_size),
             config.embedding_size, num_list, faiss.METRIC_L2)
-        # Finish training on the CPU.
         index_cpu.train(index_embeddings)
         # Add the embeddings to the index using the GPU for increased
         # performance. Shard the GPU index over all available GPUs.
@@ -227,48 +222,6 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
             index_gpu.reset()
         faiss.write_index(index_cpu, index_filename.format(mz))
         index_cpu.reset()
-
-
-def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
-    """
-    Build a quantizer with cluster centroids for ANN indexing using the
-    Euclidean distance.
-
-    The quantizer can be constructed using a subset of all data points,
-    allowing it to be built using the GPU(s).
-
-    Parameters
-    ----------
-    x : np.ndarray
-        The data used to determine cluster centroids.
-    num_centroids : int
-        The number of centroids used by the quantizer.
-
-    Returns
-    -------
-    faiss.IndexFlatL2
-        The Faiss index to be used as quantizer.
-    """
-    # If there are very few data points, directly compute the medoid point.
-    if len(x) < 39:
-        distances = faiss.pairwise_distances(x, x, faiss.METRIC_L2)
-        centroids = x[np.argmin(distances.sum(axis=0))]
-    # Otherwise use K-means clustering to select appropriate centroids.
-    else:
-        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
-        clus = faiss.Clustering(config.embedding_size, num_centroids)
-        clus.max_points_per_centroid = 10_000_000
-        co = faiss.GpuMultipleClonerOptions()
-        co.useFloat16 = True
-        co.useFloat16CoarseQuantizer = False
-        co.reserveVecs = x.shape[0]
-        clus.train(x, faiss.index_cpu_to_all_gpus(
-            faiss.IndexFlatL2(config.embedding_size), co))
-        centroids = faiss.vector_float_to_array(clus.centroids)
-    quantizer = faiss.IndexFlatL2(config.embedding_size)
-    quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
-
-    return quantizer
 
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
