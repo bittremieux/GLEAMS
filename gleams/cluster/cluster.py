@@ -249,16 +249,22 @@ def _build_quantizer(x: np.ndarray, num_centroids: int) -> faiss.IndexFlatL2:
     faiss.IndexFlatL2
         The Faiss index to be used as quantizer.
     """
-    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
-    clus = faiss.Clustering(config.embedding_size, num_centroids)
-    clus.max_points_per_centroid = 10000000
-    co = faiss.GpuMultipleClonerOptions()
-    co.useFloat16 = True
-    co.useFloat16CoarseQuantizer = False
-    co.reserveVecs = x.shape[0]
-    clus.train(x, faiss.index_cpu_to_all_gpus(
-        faiss.IndexFlatL2(config.embedding_size), co))
-    centroids = faiss.vector_float_to_array(clus.centroids)
+    # If there are very few data points, directly compute the medoid point.
+    if len(x) < 39:
+        distances = faiss.pairwise_distances(x, x, faiss.METRIC_L2)
+        centroids = x[np.argmin(distances.sum(axis=0))]
+    # Otherwise use K-means clustering to select appropriate centroids.
+    else:
+        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L424
+        clus = faiss.Clustering(config.embedding_size, num_centroids)
+        clus.max_points_per_centroid = 10_000_000
+        co = faiss.GpuMultipleClonerOptions()
+        co.useFloat16 = True
+        co.useFloat16CoarseQuantizer = False
+        co.reserveVecs = x.shape[0]
+        clus.train(x, faiss.index_cpu_to_all_gpus(
+            faiss.IndexFlatL2(config.embedding_size), co))
+        centroids = faiss.vector_float_to_array(clus.centroids)
     quantizer = faiss.IndexFlatL2(config.embedding_size)
     quantizer.add(centroids.reshape(num_centroids, config.embedding_size))
 
