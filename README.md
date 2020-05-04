@@ -10,6 +10,12 @@ This repository contains the gleams module code, a file containing trained netwo
 
 This code has been tested on a Ubuntu 16.04 LTS 64-bit machine with an Intel i7 6700k, Nvidia RTX (2070 and 2080 Ti tested), 24 GB Ram. Any modern Linux distribution should be fine. We strongly recommend using Anaconda to set up the python dependencies.
 After cloning the repo, you can create an conda environment with the environment.yml file in the repo root folder.
+
+```
+cd GLEAMS
+conda create environment.yml
+```
+
 We run it with the following dependencies:
 
 absl-py                            0.9.0              
