@@ -66,8 +66,8 @@ embedding_size = 32
 loss_label_certainty = 0.99
 margin = 1
 lr = 0.0002
-batch_size = 2048
-steps_per_epoch = 5000  # 2048 * 5000 = 10,240,000 samples per epoch
+batch_size = 256
+steps_per_epoch = 40000  # 256 * 40,000 = 10,240,000 samples per epoch
 num_epochs = 1000
 max_num_pairs_train = None
 max_num_pairs_val = 500000
