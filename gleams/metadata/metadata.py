@@ -2,9 +2,10 @@ import functools
 import itertools
 import logging
 import os
+import re
 import subprocess
 import warnings
-from typing import Iterator, List, Tuple
+from typing import Iterator, List
 
 import joblib
 import numba as nb
@@ -14,6 +15,9 @@ from spectrum_utils import utils as suu
 
 
 logger = logging.getLogger('gleams')
+
+
+regex_non_alpha = re.compile('[^A-Za-z]+')
 
 
 def convert_massivekb_metadata(massivekb_filename: str,
@@ -270,7 +274,8 @@ def generate_pairs_negative(metadata_filename: str,
                     metadata_filename)
         metadata = pd.read_parquet(metadata_filename,
                                    columns=['sequence', 'charge', 'mz'])
-        metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
+        metadata['sequence'] = (metadata['sequence'].str.replace('I', 'L')
+                                .apply(_remove_mod))
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
@@ -323,3 +328,20 @@ def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
                 yield row_nums[i]
                 yield row_nums[j]
             j += 1
+
+
+def _remove_mod(peptide: str) -> str:
+    """
+    Remove modifications indicated by a delta mass from the peptide sequence.
+
+    Parameters
+    ----------
+    peptide : str
+        The given peptide sequence string.
+
+    Returns
+    -------
+    str
+        The normalized peptide sequence, or None if the input was None.
+    """
+    return regex_non_alpha.sub('', peptide) if peptide is not None else None
