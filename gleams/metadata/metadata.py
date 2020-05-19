@@ -231,6 +231,7 @@ def generate_pairs_positive(metadata_filename: str) -> None:
                     metadata_filename)
         metadata = pd.read_parquet(metadata_filename,
                                    columns=['sequence', 'charge'])
+        metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
         metadata['row_num'] = range(len(metadata.index))
         same_row_nums = metadata.groupby(
             ['sequence', 'charge'], as_index=False, sort=False)['row_num']
@@ -269,6 +270,7 @@ def generate_pairs_negative(metadata_filename: str,
                     metadata_filename)
         metadata = pd.read_parquet(metadata_filename,
                                    columns=['sequence', 'charge', 'mz'])
+        metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
