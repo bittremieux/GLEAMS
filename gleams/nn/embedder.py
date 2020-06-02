@@ -196,11 +196,11 @@ class Embedder:
         precursor_input = Input((self.num_precursor_features,),
                                 name='input_precursor')
         precursor_dense32 = (Dense(32, activation='selu',
-                                   kernel_initializer='he_uniform',
+                                   kernel_initializer='lecun_normal',
                                    name='precursor_dense_32')
                              (precursor_input))
         precursor_dense5 = (Dense(5, activation='selu',
-                                  kernel_initializer='he_uniform',
+                                  kernel_initializer='lecun_normal',
                                   name='precursor_dense_5')
                             (precursor_dense32))
 
@@ -220,9 +220,11 @@ class Embedder:
         # Block 1.
         fragment_layer = Conv1D(
             filters, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_1_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_1_conv_2')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -230,9 +232,11 @@ class Embedder:
         # Block 2.
         fragment_layer = Conv1D(
             filters * 2, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_2_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 2, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_2_conv_2')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -240,12 +244,15 @@ class Embedder:
         # Block 3.
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -253,12 +260,15 @@ class Embedder:
         # Block 4.
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -266,12 +276,15 @@ class Embedder:
         # Block 5.
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
+            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -283,17 +296,17 @@ class Embedder:
         ref_spectra_input = Input((self.num_ref_spectra_features,),
                                   name='input_ref_spectra')
         ref_spectra_dense750 = (Dense(750, activation='selu',
-                                      kernel_initializer='he_uniform',
+                                      kernel_initializer='lecun_normal',
                                       name='ref_spectra_dense_750')
                                 (ref_spectra_input))
         ref_spectra_output = (Dense(250, activation='selu',
-                                    kernel_initializer='he_uniform',
+                                    kernel_initializer='lecun_normal',
                                     name='ref_spectra_output')
                               (ref_spectra_dense750))
 
         # Combine all outputs and add a final dense layer.
         output_layer = (Dense(config.embedding_size, activation='selu',
-                              kernel_initializer='he_uniform', name='output')
+                              kernel_initializer='lecun_normal', name='output')
                         (concatenate([precursor_dense5, fragment_output,
                                       ref_spectra_output])))
 
