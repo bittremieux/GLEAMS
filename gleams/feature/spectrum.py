@@ -3,6 +3,7 @@ import math
 
 import numba as nb
 import numpy as np
+import scipy.sparse as ss
 from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams import config
@@ -117,12 +118,11 @@ def get_num_bins(min_mz: float, max_mz: float, bin_size: float) -> int:
     return math.ceil((max_mz - min_mz) / bin_size)
 
 
-@nb.njit
 def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
               min_mz: float, bin_size: float, num_bins: int)\
-        -> np.ndarray:
+        -> ss.csr_matrix:
     """
-    Convert the given spectrum to a dense NumPy vector.
+    Convert the given spectrum to a binned sparse SciPy vector.
 
     Parameters
     ----------
@@ -139,16 +139,14 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
 
     Returns
     -------
-    np.ndarray
+    ss.csr_matrix
         The binned spectrum vector.
     """
-    vector = np.zeros((num_bins,), np.float32)
-
-    for mz, intensity in zip(spectrum_mz, spectrum_intensity):
-        bin_idx = int((mz - min_mz) / bin_size)
-        vector[bin_idx] += intensity
-
-    return vector / np.linalg.norm(vector)
+    bins = ((spectrum_mz - min_mz) / bin_size).astype(np.int32)
+    vector = ss.csr_matrix(
+        (spectrum_intensity, (np.repeat(0, len(spectrum_intensity)), bins)),
+        shape=(1, num_bins), dtype=np.float32)
+    return vector / ss.linalg.norm(vector)
 
 
 @nb.njit

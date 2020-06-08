@@ -113,11 +113,10 @@ class PrecursorEncoder(SpectrumEncoder):
             spec.precursor_mz, spec.precursor_charge)
         gray_code_mass = binary_encode(
             precursor_mass, self.mass_min, self.mass_max, self.num_bits_mass)
-        one_hot_charge = np.zeros((self.charge_max,), np.float32)
-        one_hot_charge[min(spec.precursor_charge, self.charge_max) - 1] = 1.
-        # TODO: Optimize sparse matrix creation.
-        return ss.csr_matrix(np.hstack(
-            [gray_code_mz, gray_code_mass, one_hot_charge]))
+        one_hot_charge = ss.csr_matrix(
+            ([1], ([0], [min(spec.precursor_charge, self.charge_max) - 1])),
+            shape=(1, self.charge_max), dtype=np.float32)
+        return ss.hstack([gray_code_mz, gray_code_mass, one_hot_charge])
 
 
 class FragmentEncoder(SpectrumEncoder):
@@ -162,10 +161,8 @@ class FragmentEncoder(SpectrumEncoder):
         ss.csr_matrix
             Spectrum fragment features consisting a vector of binned fragments.
         """
-        # TODO: Optimize sparse matrix creation.
-        return ss.csr_matrix(spectrum.to_vector(
-            spec.mz, spec.intensity, self.min_mz, self.bin_size,
-            self.num_bins))
+        return spectrum.to_vector(
+            spec.mz, spec.intensity, self.min_mz, self.bin_size, self.num_bins)
 
 
 class ReferenceSpectraEncoder(SpectrumEncoder):
@@ -231,11 +228,10 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
             Reference spectrum features consisting of the spectrum's dot
             product similarity to a set of reference spectra.
         """
-        # TODO: Optimize sparse matrix creation.
-        return ss.csr_matrix(np.asarray([
+        return ss.csr_matrix([
             spectrum.dot(ref.mz, ref.intensity, spec.mz, spec.intensity,
                          self.fragment_mz_tol)
-            for ref in self.ref_spectra], dtype=np.float32))
+            for ref in self.ref_spectra], dtype=np.float32)
 
 
 class MultipleEncoder(SpectrumEncoder):
@@ -297,7 +293,7 @@ def neutral_mass_from_mz_charge(mz: float, charge: int) -> float:
     return (mz - hydrogen_mass) * charge
 
 
-def _gray_code(value: int, num_bits: int) -> np.ndarray:
+def _gray_code(value: int, num_bits: int) -> ss.csr_matrix:
     """
     Return the Gray code for a given integer, given the number of bits to use
     for the encoding.
@@ -312,11 +308,12 @@ def _gray_code(value: int, num_bits: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
-        An array of individual bit values as floats.
+    ss.csr_matrix
+        A sparse array of individual bit values as floats.
     """
     # Gray encoding: https://stackoverflow.com/a/38745459
-    return np.asarray(list(f'{value ^ (value >> 1):0{num_bits}b}'), np.float32)
+    return ss.csr_matrix(list(f'{value ^ (value >> 1):0{num_bits}b}'),
+                         dtype=np.float32)
 
 
 @nb.njit
@@ -354,7 +351,7 @@ def _get_bin_index(value: float, min_value: float, max_value: float,
 
 
 def binary_encode(value: float, min_value: float, max_value: float,
-                  num_bits: int) -> np.ndarray:
+                  num_bits: int) -> ss.csr_matrix:
     """
     Return the Gray code for a given value, given the number of bits to use
     for the encoding. The given number of bits equally spans the range between
@@ -375,8 +372,8 @@ def binary_encode(value: float, min_value: float, max_value: float,
 
     Returns
     -------
-    np.ndarray
-        An array of individual bit values as floats.
+    ss.csr_matrix
+        A sparse array of individual bit values as floats.
     """
     bin_index = _get_bin_index(value, min_value, max_value, num_bits)
     return _gray_code(bin_index, num_bits)
