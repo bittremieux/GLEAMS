@@ -3,6 +3,7 @@ import math
 from typing import List, Tuple
 
 import numpy as np
+import scipy.sparse as ss
 from keras.utils import Sequence
 
 
@@ -25,7 +26,7 @@ class PairSequence(Sequence):
         Parameters
         ----------
         filename_feat : str
-            A NumPy binary file containing the encoded spectrum features.
+            A SciPy sparse file containing the encoded spectrum features.
         filename_pairs_pos : str
             The file name of the positive pair indexes. Comma-separated file
             with feature/spectrum indexes corresponding to the metadata file.
@@ -45,7 +46,7 @@ class PairSequence(Sequence):
             Whether to shuffle the order of the batches at the beginning of
             each epoch.
         """
-        self.features = np.load(filename_feat, mmap_mode='r')
+        self.features = ss.load_npz(filename_feat)
 
         pairs_pos = np.load(filename_pairs_pos, mmap_mode='r')
         pairs_neg = np.load(filename_pairs_neg, mmap_mode='r')
@@ -117,15 +118,15 @@ class PairSequence(Sequence):
 
 class EncodingsSequence(Sequence):
 
-    def __init__(self, encodings: List[np.ndarray], batch_size: int,
+    def __init__(self, encodings: ss.csr_matrix, batch_size: int,
                  feature_split: Tuple[int, int]):
         """
         Initialize the EncodingsSequence generator.
 
         Parameters
         ----------
-        encodings : List[np.ndarray]
-            A list of encodings as a single NumPy array.
+        encodings : ss.csr_matrix
+            Sparse SciPy array with encodings as rows.
         batch_size : int
             The (maximum) size of each batch. Batch sizes can sometimes be
             smaller than this maximum size in case of missing feature vectors.
@@ -170,7 +171,7 @@ class EncodingsSequence(Sequence):
             *self.feature_split))
 
 
-def _split_features_to_input(x: List[np.ndarray], idx1: int, idx2: int)\
+def _split_features_to_input(x: ss.csr_matrix, idx1: int, idx2: int)\
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert individual features to arrays corresponding to the three inputs for
@@ -178,8 +179,8 @@ def _split_features_to_input(x: List[np.ndarray], idx1: int, idx2: int)\
 
     Parameters
     ----------
-    x : List[np.ndarray]
-        List of feature arrays.
+    x : List[ss.csr_matrix]
+        Sparse feature array with encodings as rows.
     idx1 : int
         First index to split the feature arrays.
     idx2 : int
@@ -191,5 +192,5 @@ def _split_features_to_input(x: List[np.ndarray], idx1: int, idx2: int)\
         The features are split in three arrays according to the two split
         indexes.
     """
-    x = np.asarray(x)
+    x = x.toarray()
     return x[:, :idx1], x[:, idx1:idx2], x[:, idx2:]

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import scipy.sparse as ss
 from keras import backend as K
 
 from gleams import config
@@ -34,13 +35,13 @@ def train_nn(filename_model: str, filename_feat_train: str,
     filename_model : str
         The file name where the model will be saved.
     filename_feat_train : str
-        The file name of the training NumPy binary feature file.
+        The file name of the training SciPy sparse feature file.
     filename_train_pairs_pos : str
         The file name of the positive training pair indexes.
     filename_train_pairs_neg : str
         The file name of the negative training pair indexes.
     filename_feat_val : str
-        The file name of the validation NumPy binary feature file.
+        The file name of the validation SciPy sparse feature file.
     filename_val_pairs_pos : str
         The file name of the positive validation pair indexes.
     filename_val_pairs_neg : str
@@ -190,7 +191,7 @@ def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
     emb.load()
     logger.debug('Embed the spectrum encodings and save to file %s', filename)
     encodings_generator = data_generator.EncodingsSequence(
-        encodings, batch_size, _get_feature_split())
+        ss.vstack(encodings), batch_size, _get_feature_split())
     np.save(filename, np.vstack(emb.embed(encodings_generator)))
     # FIXME: Avoid Keras memory leak.
     #        Possible issue: https://github.com/keras-team/keras/issues/13118
