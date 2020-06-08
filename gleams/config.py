@@ -46,9 +46,9 @@ num_precursor_features = (num_bits_precursor_mz + num_bits_precursor_mass +
 
 # Fragment encoding.
 averagine_peak_separation_da = 1.0005079
-fragment_mz_min = averagine_peak_separation_da * 50.5
+fragment_mz_min = 50.45
 fragment_mz_max = 2500.
-bin_size = averagine_peak_separation_da
+bin_size = 0.1
 num_fragment_features = spectrum.get_num_bins(fragment_mz_min, fragment_mz_max,
                                               bin_size)
 
