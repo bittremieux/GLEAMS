@@ -191,7 +191,7 @@ def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
     emb.load()
     logger.debug('Embed the spectrum encodings and save to file %s', filename)
     encodings_generator = data_generator.EncodingsSequence(
-        ss.vstack(encodings), batch_size, _get_feature_split())
+        ss.vstack(encodings, 'csr'), batch_size, _get_feature_split())
     np.save(filename, np.vstack(emb.embed(encodings_generator)))
     # FIXME: Avoid Keras memory leak.
     #        Possible issue: https://github.com/keras-team/keras/issues/13118

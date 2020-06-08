@@ -140,7 +140,7 @@ def convert_peaks_to_features(metadata_filename: str)\
                     encodings.extend(file_encodings)
             # Store the encoded spectra in a file per dataset.
             if len(metadata_index) > 0:
-                ss.save_npz(filename_encodings, ss.vstack(encodings))
+                ss.save_npz(filename_encodings, ss.vstack(encodings, 'csr'))
                 metadata.loc[metadata_index].reset_index().to_parquet(
                     filename_index, index=False)
 
@@ -160,7 +160,7 @@ def combine_features(metadata_filename: str) -> None:
     feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
     feat_filename = os.path.join(feat_dir, os.path.splitext(
         os.path.basename(metadata_filename))[0].replace('metadata', 'feature'))
-    if (os.path.isfile(f'{feat_filename}.npy') and
+    if (os.path.isfile(f'{feat_filename}.npz') and
             os.path.isfile(f'{feat_filename}.parquet')):
         return
     datasets = pd.read_parquet(
@@ -181,5 +181,5 @@ def combine_features(metadata_filename: str) -> None:
         else:
             encodings.append(ss.load_npz(dataset_encodings_filename))
             indexes.append(pq.read_table(dataset_index_filename))
-    np.save(f'{feat_filename}.npz', ss.vstack(encodings))
+    ss.save_npz(f'{feat_filename}.npz', ss.vstack(encodings, 'csr'))
     pq.write_table(pa.concat_tables(indexes), f'{feat_filename}.parquet')
