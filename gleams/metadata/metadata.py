@@ -281,17 +281,12 @@ def generate_pairs_negative(metadata_filename: str,
                     .reset_index(drop=True))
         row_nums = metadata['row_num'].values
         # List because Numba can't handle object (string) arrays.
-        sequences = metadata['sequence'].tolist()
+        sequences = nb.typed.List(metadata['sequence'])
         mzs = metadata['mz'].values
         logger.debug('Save negative pair indexes to %s', pairs_filename)
-        with warnings.catch_warnings():
-            # FIXME: Deprecated reflected list in Numba should be resolved from
-            #        version 0.46.0 onwards.
-            #  https://numba.pydata.org/numba-doc/latest/reference/deprecation.html#deprecation-of-reflection-for-list-and-set-types
-            warnings.simplefilter('ignore', nb.NumbaPendingDeprecationWarning)
-            np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
-                row_nums, sequences, mzs, mz_tolerance), np.uint32)
-                    .reshape((-1, 2)))
+        np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
+            row_nums, sequences, mzs, mz_tolerance), np.uint32)
+                .reshape((-1, 2)))
 
 
 @nb.njit
