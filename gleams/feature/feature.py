@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import scipy.sparse as ss
 
 from gleams import config
 from gleams.feature import encoder, spectrum
@@ -119,7 +120,7 @@ def convert_peaks_to_features(metadata_filename: str)\
         # Group all encoded spectra per dataset.
         feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
         filename_encodings = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.npy')
+            feat_dir, 'dataset', f'{dataset}.npz')
         filename_index = os.path.join(
             feat_dir, 'dataset', f'{dataset}.parquet')
         if (not os.path.isfile(filename_encodings) or
@@ -139,7 +140,7 @@ def convert_peaks_to_features(metadata_filename: str)\
                     encodings.extend(file_encodings)
             # Store the encoded spectra in a file per dataset.
             if len(metadata_index) > 0:
-                np.save(filename_encodings, np.vstack(encodings))
+                ss.save_npz(filename_encodings, ss.vstack(encodings))
                 metadata.loc[metadata_index].reset_index().to_parquet(
                     filename_index, index=False)
 
@@ -170,7 +171,7 @@ def combine_features(metadata_filename: str) -> None:
     for i, dataset in enumerate(datasets, 1):
         logger.debug('Append dataset %s [%3d/%3d]', dataset, i, len(datasets))
         dataset_encodings_filename = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.npy')
+            feat_dir, 'dataset', f'{dataset}.npz')
         dataset_index_filename = os.path.join(
             feat_dir, 'dataset', f'{dataset}.parquet')
         if (not os.path.isfile(dataset_encodings_filename) or
@@ -178,7 +179,7 @@ def combine_features(metadata_filename: str) -> None:
             logger.warning('Missing features for dataset %s, skipping...',
                            dataset)
         else:
-            encodings.append(np.load(dataset_encodings_filename))
+            encodings.append(ss.load_npz(dataset_encodings_filename))
             indexes.append(pq.read_table(dataset_index_filename))
-    np.save(f'{feat_filename}.npy', np.vstack(encodings))
+    np.save(f'{feat_filename}.npz', ss.vstack(encodings))
     pq.write_table(pa.concat_tables(indexes), f'{feat_filename}.parquet')

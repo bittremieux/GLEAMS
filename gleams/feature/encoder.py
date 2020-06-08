@@ -1,11 +1,11 @@
 import abc
 import itertools
 import logging
-import random
 from typing import List
 
 import numba as nb
 import numpy as np
+import scipy.sparse as ss
 from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams.feature import spectrum
@@ -91,7 +91,7 @@ class PrecursorEncoder(SpectrumEncoder):
             *[f'precursor_mass_{i}' for i in range(self.num_bits_mass)],
             *[f'precursor_charge_{i}' for i in range(self.charge_max)]]
 
-    def encode(self, spec: MsmsSpectrum) -> np.ndarray:
+    def encode(self, spec: MsmsSpectrum) -> ss.csr_matrix:
         """
         Encode the precursor of the given spectrum.
 
@@ -102,7 +102,7 @@ class PrecursorEncoder(SpectrumEncoder):
 
         Returns
         -------
-        np.ndarray
+        ss.csr_matrix
             Spectrum precursor features consisting of: a gray encoding of the
             precursor m/z, a gray encoding of the precursor neutral mass, and
             a one-hot encoding of the precursor charge.
@@ -115,7 +115,9 @@ class PrecursorEncoder(SpectrumEncoder):
             precursor_mass, self.mass_min, self.mass_max, self.num_bits_mass)
         one_hot_charge = np.zeros((self.charge_max,), np.float32)
         one_hot_charge[min(spec.precursor_charge, self.charge_max) - 1] = 1.
-        return np.hstack([gray_code_mz, gray_code_mass, one_hot_charge])
+        # TODO: Optimize sparse matrix creation.
+        return ss.csr_matrix(np.hstack(
+            [gray_code_mz, gray_code_mass, one_hot_charge]))
 
 
 class FragmentEncoder(SpectrumEncoder):
@@ -146,7 +148,7 @@ class FragmentEncoder(SpectrumEncoder):
         self.feature_names = [f'fragment_bin_{i}'
                               for i in range(self.num_bins)]
 
-    def encode(self, spec: MsmsSpectrum) -> np.ndarray:
+    def encode(self, spec: MsmsSpectrum) -> ss.csr_matrix:
         """
         Encode the fragments of the given spectrum.
 
@@ -157,11 +159,13 @@ class FragmentEncoder(SpectrumEncoder):
 
         Returns
         -------
-        np.ndarray
+        ss.csr_matrix
             Spectrum fragment features consisting a vector of binned fragments.
         """
-        return spectrum.to_vector(spec.mz, spec.intensity, self.min_mz,
-                                  self.bin_size, self.num_bins)
+        # TODO: Optimize sparse matrix creation.
+        return ss.csr_matrix(spectrum.to_vector(
+            spec.mz, spec.intensity, self.min_mz, self.bin_size,
+            self.num_bins))
 
 
 class ReferenceSpectraEncoder(SpectrumEncoder):
@@ -211,7 +215,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
 
         self.feature_names = [f'ref_{i}' for i in range(len(ref_spectra))]
 
-    def encode(self, spec: MsmsSpectrum) -> np.ndarray:
+    def encode(self, spec: MsmsSpectrum) -> ss.csr_matrix:
         """
         Encode the given spectrum by its similarity with a set of reference
         spectra.
@@ -223,13 +227,15 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
 
         Returns
         -------
-        np.ndarray
+        ss.csr_matrix
             Reference spectrum features consisting of the spectrum's dot
             product similarity to a set of reference spectra.
         """
-        return np.asarray([spectrum.dot(ref.mz, ref.intensity, spec.mz,
-                                        spec.intensity, self.fragment_mz_tol)
-                           for ref in self.ref_spectra], dtype=np.float32)
+        # TODO: Optimize sparse matrix creation.
+        return ss.csr_matrix(np.asarray([
+            spectrum.dot(ref.mz, ref.intensity, spec.mz, spec.intensity,
+                         self.fragment_mz_tol)
+            for ref in self.ref_spectra], dtype=np.float32))
 
 
 class MultipleEncoder(SpectrumEncoder):
@@ -253,7 +259,7 @@ class MultipleEncoder(SpectrumEncoder):
         self.feature_names = list(itertools.chain.from_iterable(
             [enc.feature_names for enc in self.encoders]))
 
-    def encode(self, spec: MsmsSpectrum) -> np.ndarray:
+    def encode(self, spec: MsmsSpectrum) -> ss.csr_matrix:
         """
         Encode the given spectrum using the child encoders.
 
@@ -264,10 +270,10 @@ class MultipleEncoder(SpectrumEncoder):
 
         Returns
         -------
-        np.ndarray
+        ss.csr_matrix
             Concatenated spectrum features produced by all child encoders.
         """
-        return np.hstack([enc.encode(spec) for enc in self.encoders])
+        return ss.hstack([enc.encode(spec) for enc in self.encoders])
 
 
 @nb.njit
