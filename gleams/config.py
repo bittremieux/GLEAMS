@@ -19,10 +19,10 @@ val_ratio = 0.1
 test_ratio = 0.1
 split_ratio_tolerance = 0.01
 pair_mz_tolerance = 10  # ppm
+negative_pair_fragment_tolerance = 0.01  # Da
+negative_pair_matching_fragments_threshold = 0.25
 
 # MS/MS spectrum preprocessing settings.
-
-# Minimum number of peaks for an MS/MS spectrum to be considered.
 min_peaks = 10
 min_mz_range = 250.
 remove_precursor_tolerance = 2  # Da

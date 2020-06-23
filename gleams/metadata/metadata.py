@@ -4,13 +4,13 @@ import logging
 import os
 import re
 import subprocess
-import warnings
 from typing import Iterator, List
 
 import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
+from spectrum_utils import spectrum as sus
 from spectrum_utils import utils as suu
 
 
@@ -18,6 +18,7 @@ logger = logging.getLogger('gleams')
 
 
 regex_non_alpha = re.compile('[^A-Za-z]+')
+regex_mod = re.compile('\+\d+.\d+')
 
 
 def convert_massivekb_metadata(massivekb_filename: str,
@@ -248,14 +249,17 @@ def generate_pairs_positive(metadata_filename: str) -> None:
 
 
 def generate_pairs_negative(metadata_filename: str,
-                            mz_tolerance: float) -> None:
+                            mz_tolerance: float,
+                            fragment_tolerance: float,
+                            matching_fragments_threshold: float) \
+        -> None:
     """
     Generate index pairs for negative training pairs for the given metadata
     file.
 
     The negative training pairs consist of all pairs with a different peptide
-    sequence and a precursor m/z difference smaller than the given m/z
-    tolerance in the metadata.
+    sequence, a precursor m/z difference smaller than the given m/z tolerance,
+    and mostly non-overlapping b and y ions..
     Pairs of row numbers in the metadata file for each negative pair are stored
     in Parquet file `{metadata_filename}_pairs_neg.parquet`.
     If this file already exists it will _not_ be recreated.
@@ -267,6 +271,13 @@ def generate_pairs_negative(metadata_filename: str,
     mz_tolerance : float
         Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
         negative pair.
+    fragment_tolerance : float
+        Maximum fragment m/z tolerance in Da for two fragments to be considered
+        overlapping (to avoid overly similar negative pairs).
+    matching_fragments_threshold : float
+        Maximum ratio of matching fragments relative to the number of b and y
+        ions of shortest peptide to be considered a negative pair (to avoid
+        overly similar negative pairs).
     """
     pairs_filename = metadata_filename.replace('.parquet', '_pairs_neg.npy')
     if not os.path.isfile(pairs_filename):
@@ -274,57 +285,51 @@ def generate_pairs_negative(metadata_filename: str,
                     metadata_filename)
         metadata = pd.read_parquet(metadata_filename,
                                    columns=['sequence', 'charge', 'mz'])
-        metadata['sequence'] = (metadata['sequence'].str.replace('I', 'L')
-                                .apply(_remove_mod))
         metadata['row_num'] = range(len(metadata.index))
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
         row_nums = metadata['row_num'].values
-        # List because Numba can't handle object (string) arrays.
-        sequences = nb.typed.List(metadata['sequence'])
         mzs = metadata['mz'].values
+        # List because Numba can't handle object (string) arrays.
+        sequences = nb.typed.List(metadata['sequence'].str.replace('I', 'L')
+                                  .apply(_remove_mod))
+        fragments = nb.typed.List(metadata['sequence']
+                                  .apply(_get_theoretical_fragment_mzs))
         logger.debug('Save negative pair indexes to %s', pairs_filename)
         np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
-            row_nums, sequences, mzs, mz_tolerance), np.uint32)
+            row_nums, mzs, sequences, fragments, mz_tolerance,
+            fragment_tolerance, matching_fragments_threshold), np.uint32)
                 .reshape((-1, 2)))
 
 
-@nb.njit
-def _generate_pairs_negative(row_nums: np.ndarray, sequences: List[str],
-                             mzs: np.ndarray, mz_tolerance: float)\
-        -> Iterator[int]:
+@functools.lru_cache(None)
+def _get_theoretical_fragment_mzs(sequence: str) -> np.ndarray:
     """
-    Numba utility function to efficiently generate row numbers for negative
-    pairs.
+    Get the theoretical b and y ion m/z values for the given peptide sequence.
 
     Parameters
     ----------
-    row_nums : np.ndarray
-        A NumPy array of row numbers for each PSM.
-    sequences : List[str]
-        A list of peptide sequences for each PSM.
-    mzs : np.ndarray
-        A NumPy array of precursor m/z values for each PSM.
-    mz_tolerance : float
-        Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
-        negative pair.
+    sequence : str
+        The peptide sequence for which b and y ion m/z values will be
+        calculated.
 
     Returns
     -------
-    Iterator[int]
-        A generator of row numbers for the negative pairs, with row numbers `i`
-        and `i + 1` forming pairs.
+    np.ndarray
+        An array of sorted m/z values of the b and y ions for the given peptide
+        sequence.
     """
-    for i in range(len(row_nums)):
-        j = i + 1
-        while (j < len(mzs) and
-               abs(suu.mass_diff(mzs[i], mzs[j], False)) <= mz_tolerance):
-            if sequences[i] != sequences[j]:
-                yield row_nums[i]
-                yield row_nums[j]
-            j += 1
+    # Correct for 0-based offsets required by spectrum_utils.
+    mods, mod_pos_offset = {}, 1
+    for match in re.finditer(regex_mod, sequence):
+        mods[match.start() - mod_pos_offset] = float(match.group(0))
+        mod_pos_offset += match.end() - match.start()
+    return np.asarray([fragment.calc_mz for fragment in
+                       sus._get_theoretical_peptide_fragments(
+                           _remove_mod(sequence), mods)])
 
 
+@functools.lru_cache(None)
 def _remove_mod(peptide: str) -> str:
     """
     Remove modifications indicated by a delta mass from the peptide sequence.
@@ -340,3 +345,67 @@ def _remove_mod(peptide: str) -> str:
         The normalized peptide sequence, or None if the input was None.
     """
     return regex_non_alpha.sub('', peptide) if peptide is not None else None
+
+
+@nb.njit
+def _generate_pairs_negative(row_nums: np.ndarray, mzs: np.ndarray,
+                             sequences: nb.typed.List,
+                             fragments: nb.typed.List,
+                             precursor_mz_tol: float, fragment_mz_tol: float,
+                             matching_fragments_threshold: float) \
+        -> Iterator[int]:
+    """
+    Numba utility function to efficiently generate row numbers for negative
+    pairs.
+
+    Parameters
+    ----------
+    row_nums : np.ndarray
+        A NumPy array of row numbers for each PSM.
+    mzs : np.ndarray
+        A NumPy array of precursor m/z values for each PSM.
+    sequences : nb.typed.List
+        A list of peptide sequences for each PSM.
+    fragments: nb.typed.List
+        Theoretical fragments of the peptides corresponding to each PSM.
+    precursor_mz_tol : float
+        Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
+        negative pair.
+    fragment_mz_tol : float
+        Maximum fragment m/z tolerance in Da for two fragments to be considered
+        overlapping.
+    matching_fragments_threshold : float
+        Maximum ratio of matching fragments relative to the number of b and y
+        ions of shortest peptide to be considered a negative pair.
+
+    Returns
+    -------
+    Iterator[int]
+        A generator of row numbers for the negative pairs, with row numbers `i`
+        and `i + 1` forming pairs.
+    """
+    for row_num1 in range(len(row_nums)):
+        row_num2 = row_num1 + 1
+        while (row_num2 < len(mzs) and
+               (abs(suu.mass_diff(mzs[row_num1], mzs[row_num2], False))
+                <= precursor_mz_tol)):
+            if sequences[row_num1] != sequences[row_num2]:
+                fragments1 = fragments[row_num1]
+                fragments2 = fragments[row_num2]
+                num_matching_fragments = 0
+                for fragment1_i, fragment2 in zip(
+                        np.searchsorted(fragments1, fragments2), fragments2):
+                    fragment1_left = fragments1[max(0, fragment1_i - 1)]
+                    fragment1_right = fragments1[min(fragment1_i,
+                                                     len(fragments1) - 1)]
+                    if ((abs(fragment1_left - fragment2) < fragment_mz_tol)
+                            or (abs(fragment1_right - fragment2)
+                                < fragment_mz_tol)):
+                        num_matching_fragments += 1
+
+                if num_matching_fragments < matching_fragments_threshold * min(
+                        len(fragments1), len(fragments2)):
+                    yield row_nums[row_num1]
+                    yield row_nums[row_num2]
+
+            row_num2 += 1
