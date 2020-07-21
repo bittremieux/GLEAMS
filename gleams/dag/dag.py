@@ -4,7 +4,7 @@ import sys
 # Make sure all code is in the PATH.
 sys.path.append(os.path.normpath(os.path.join(os.path.dirname(__file__),
                                               os.pardir, os.pardir)))
-# Limit annoying Tensforflow logging to only warnings and errors.
+# Limit annoying Tensorflow logging to only warnings and errors.
 # 1: No FILTER logging.
 # 2: No WARNING logging.
 # 3: No ERROR logging.
@@ -26,17 +26,6 @@ from gleams.cluster import cluster
 from gleams.feature import feature
 from gleams.metadata import metadata
 from gleams.nn import nn
-
-
-# Fix logging hijacking by Tensorflow/abseil.
-# FIXME: https://github.com/abseil/abseil-py/issues/99
-# FIXME: https://github.com/tensorflow/tensorflow/issues/26691
-try:
-    import absl.logging
-    logging.root.removeHandler(absl.logging._absl_handler)
-    absl.logging._warn_preinit_stderr = False
-except Exception as e:
-    pass
 
 
 # Initialize logging.
