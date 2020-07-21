@@ -1,5 +1,6 @@
-# Limit annoying Tensforflow logging to only warnings and errors.
 import os
+
+# Limit annoying Tensorflow logging to only warnings and errors.
 # 1: No FILTER logging.
 # 2: No WARNING logging.
 # 3: No ERROR logging.
@@ -15,35 +16,20 @@ try:
 except Exception as e:
     pass
 
-# Code taken from: https://keras.io/getting-started/faq/#how-can-i-obtain-reproducible-results-using-keras-during-development
+# https://github.com/NVIDIA/framework-determinism
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
+
+import random
 
 import numpy as np
-import tensorflow.compat.v1 as tf
-import random as rn
+import tensorflow as tf
 
 
 def set_seeds(my_seed=42):
-    # The below is necessary for starting Numpy generated random numbers
-    # in a well-defined initial state.
+    os.environ['PYTHONHASHSEED'] = str(my_seed)
+    random.seed(my_seed)
     np.random.seed(my_seed)
+    tf.random.set_seed(my_seed)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+    tf.config.threading.set_inter_op_parallelism_threads(1)
 
-    # The below is necessary for starting core Python generated random numbers
-    # in a well-defined state.
-    rn.seed(my_seed)
-
-    # Force TensorFlow to use single thread.
-    # Multiple threads are a potential source of non-reproducible results.
-    # For further details, see: https://stackoverflow.com/questions/42022950/
-    session_conf = tf.ConfigProto(intra_op_parallelism_threads=1,
-                                  inter_op_parallelism_threads=1)
-
-    from keras import backend as K
-
-    # The below tf.set_random_seed() will make random number generation
-    # in the TensorFlow backend have a well-defined initial state.
-    # For further details, see:
-    # https://www.tensorflow.org/api_docs/python/tf/set_random_seed
-    tf.set_random_seed(my_seed)
-
-    sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
-    K.set_session(sess)

@@ -20,7 +20,6 @@ import multiprocessing_logging
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from airflow.utils import helpers
-import tensorflow.compat.v1 as tf
 
 from gleams import config
 from gleams.cluster import cluster
@@ -38,8 +37,6 @@ try:
     absl.logging._warn_preinit_stderr = False
 except Exception as e:
     pass
-# Disable Tensorflow v1 deprecation warnings.
-tf.logging.set_verbosity(tf.logging.ERROR)
 
 
 # Initialize logging.
