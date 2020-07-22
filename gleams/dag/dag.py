@@ -1,22 +1,18 @@
-import logging
 import os
 import sys
 # Make sure all code is in the PATH.
 sys.path.append(os.path.normpath(os.path.join(os.path.dirname(__file__),
                                               os.pardir, os.pardir)))
-# Limit annoying Tensorflow logging to only warnings and errors.
-# 1: No FILTER logging.
-# 2: No WARNING logging.
-# 3: No ERROR logging.
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
+# Initialize logging.
+from gleams import logger
+logger.init()
 
 # Initialize all random seeds before importing any packages.
 from gleams import rndm
 rndm.set_seeds()
 
 import datetime
-
-import multiprocessing_logging
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
 from airflow.utils import helpers
@@ -28,19 +24,11 @@ from gleams.metadata import metadata
 from gleams.nn import nn
 
 
-# Initialize logging.
-logging.basicConfig(format='{asctime} [{levelname}/{processName}] '
-                           '{module}.{funcName} : {message}',
-                    style='{', level=logging.DEBUG, force=True)
-logging.captureWarnings(True)
-multiprocessing_logging.install_mp_handler()
-
-
 default_args = {
     'owner': 'gleams',
     'depends_on_past': False,
-    'start_date': datetime.datetime(2019, 1, 1),
-    'email': ['wbittremieux@ucsd.edu'],
+    'start_date': datetime.datetime(2020, 1, 1),
+    'email': ['wbittremieux@health.ucsd.edu'],
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 3,

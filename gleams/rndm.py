@@ -1,15 +1,8 @@
 import os
-
-# Limit annoying Tensorflow logging to only warnings and errors.
-# 1: No FILTER logging.
-# 2: No WARNING logging.
-# 3: No ERROR logging.
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+import random
 
 # https://github.com/NVIDIA/framework-determinism
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
-
-import random
 
 import numpy as np
 import tensorflow as tf
