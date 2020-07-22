@@ -13,7 +13,6 @@ dependencies:
   - gxx_linux-64=7.5
   - joblib=0.16
   - jupyter=1.0.0
-  - keras=2.4
   - libiconv=1.15
   - matplotlib=3.3
   - numba=0.50
