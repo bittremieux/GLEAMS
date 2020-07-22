@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 import numpy as np
 import scipy.sparse as ss
-from keras.utils import Sequence
+from tensorflow.keras.utils import Sequence
 
 
 logger = logging.getLogger('gleams')

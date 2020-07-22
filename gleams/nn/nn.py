@@ -8,7 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import scipy.sparse as ss
-from keras import backend as K
+from tensorflow.keras import backend as K
 
 from gleams import config
 from gleams.feature import encoder, feature
@@ -61,15 +61,14 @@ def train_nn(filename_model: str, filename_feat_train: str,
     logger.info('Train the GLEAMS neural network')
     # Choose appropriate hyperparameters based on the number of GPUs that are
     # being used.
-    num_gpus = embedder._get_num_gpus()
-    if num_gpus == 0:
+    if emb.num_gpu == 0:
         raise RuntimeError('No GPU found')
-    batch_size = config.batch_size * num_gpus
-    steps_per_epoch = config.steps_per_epoch // num_gpus
-    if num_gpus > 1:
+    batch_size = config.batch_size * emb.num_gpu
+    steps_per_epoch = config.steps_per_epoch // emb.num_gpu
+    if emb.num_gpu > 1:
         logger.info('Adjusting the batch size to %d and the steps per epoch to'
                     ' %d for running on %d GPUs', batch_size, steps_per_epoch,
-                    num_gpus)
+                    emb.num_gpu)
     train_generator = data_generator.PairSequence(
         filename_feat_train, filename_train_pairs_pos,
         filename_train_pairs_neg, batch_size, _get_feature_split(),
@@ -120,10 +119,14 @@ def embed(metadata_filename: str, model_filename: str) -> None:
             config.num_ref_spectra)
     ])
 
-    num_gpus = embedder._get_num_gpus()
-    if num_gpus == 0:
+    logger.debug('Load the stored GLEAMS neural network')
+    emb = embedder.Embedder(
+        config.num_precursor_features, config.num_fragment_features,
+        config.num_ref_spectra, config.lr, model_filename)
+    emb.load()
+    if emb.num_gpu == 0:
         raise RuntimeError('No GPU found')
-    batch_size = config.batch_size * num_gpus
+    batch_size = config.batch_size * emb.num_gpu
 
     logger.info('Embed all peak files for metadata file %s', metadata_filename)
     dataset_total = metadata['dataset'].nunique()
@@ -153,7 +156,7 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                     encodings.extend(file_encodings)
             if len(encodings) > 0:
                 _embed_and_save(
-                    encodings, batch_size, model_filename,
+                    encodings, batch_size, emb,
                     filename_embedding.replace('.npy', f'_{i}.npy'))
         if len(scans) > 0:
             scans = pd.concat(scans, ignore_index=True, sort=False, copy=False)
@@ -169,7 +172,7 @@ def embed(metadata_filename: str, model_filename: str) -> None:
 
 
 def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
-                    model_filename: str, filename: str) -> None:
+                    emb: embedder.Embedder, filename: str) -> None:
     """
     Embed the given encodings and save them as a NumPy file.
 
@@ -179,16 +182,11 @@ def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
         A list of encoding arrays to be embedded.
     batch_size : int
         The number of encodings to embed simultaneously.
-    model_filename : str
-        The GLEAMS model filename.
+    emb : embedder.Embedder
+        The GLEAMS embedder.
     filename : str
         File name to store the embedded encodings.
     """
-    logger.debug('Load the stored GLEAMS neural network')
-    emb = embedder.Embedder(
-        config.num_precursor_features, config.num_fragment_features,
-        config.num_ref_spectra, config.lr, model_filename)
-    emb.load()
     logger.debug('Embed the spectrum encodings and save to file %s', filename)
     encodings_generator = data_generator.EncodingsSequence(
         ss.vstack(encodings, 'csr'), batch_size, _get_feature_split())
