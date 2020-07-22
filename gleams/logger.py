@@ -26,4 +26,5 @@ def init():
     # Disable dependency non-critical log messages.
     logging.getLogger('airflow').setLevel(logging.WARNING)
     logging.getLogger('faiss').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('tensorflow').setLevel(logging.WARNING)
