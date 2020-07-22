@@ -370,10 +370,9 @@ class Embedder:
         filename_log = f'{filename}.log'
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
-        callbacks = [EmbedderWeightsSaver(
-                        self, filename + '.epoch{epoch:03d}' + ext),
+        callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
                      CrocHistory(val_generator, filename_log),
-                     CSVLogger(filename_log),
+                     CSVLogger(filename_log)]
         self.siamese_model.fit(
             train_generator, steps_per_epoch=steps_per_epoch,
             epochs=num_epochs, callbacks=callbacks,
@@ -400,22 +399,6 @@ class Embedder:
 
 
 class CrocHistory(Callback):
-    """
-    Custom callback to save the embedder model's weights because Keras doesn't
-    play nice with checkpointing models running on multiple GPUs.
-    FIXME: https://github.com/keras-team/keras/issues/8123
-    """
-
-    def __init__(self, embedder: Embedder, filepath: str):
-        super().__init__()
-
-        self.embedder = embedder
-        self.filepath = filepath
-
-    def on_epoch_end(self, epoch, logs=None):
-        self.embedder._get_embedder_model().save_weights(
-            self.filepath.format(epoch=epoch + 1))
-
     """
     Track the AUC CROC on the validation data after each epoch ends.
     """
