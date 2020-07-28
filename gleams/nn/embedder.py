@@ -195,11 +195,9 @@ class Embedder:
         # Block 1.
         fragment_layer = Conv1D(
             filters, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_1_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_1_conv_2')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -207,11 +205,9 @@ class Embedder:
         # Block 2.
         fragment_layer = Conv1D(
             filters * 2, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_2_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 2, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_2_conv_2')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -219,15 +215,12 @@ class Embedder:
         # Block 3.
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 4, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_3_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -235,15 +228,12 @@ class Embedder:
         # Block 4.
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_4_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
@@ -251,15 +241,12 @@ class Embedder:
         # Block 5.
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_1')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_2')(fragment_layer)
         fragment_layer = Conv1D(
             filters * 8, kernel_size, strides=strides, activation='selu',
-            kernel_initializer='lecun_normal',
             name='fragment_block_5_conv_3')(fragment_layer)
         fragment_layer = MaxPooling1D(
             pool_size, pool_strides,
