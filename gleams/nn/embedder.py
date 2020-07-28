@@ -281,7 +281,8 @@ class Embedder:
 
         # Combine all outputs and add a final dense layer.
         output_layer = (Dense(config.embedding_size, activation='selu',
-                              kernel_initializer='lecun_normal', name='output')
+                              kernel_initializer='lecun_normal',
+                              activity_regularizer='l2', name='output')
                         (concatenate([precursor_dense5, fragment_output,
                                       ref_spectra_output])))
 
