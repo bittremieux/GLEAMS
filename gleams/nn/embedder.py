@@ -10,6 +10,7 @@ from tensorflow.keras.layers import concatenate, Conv1D, Dense, Flatten, \
     Lambda, MaxPooling1D, Reshape
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
+from tensorflow_addons.optimizers import RectifiedAdam
 from sklearn.metrics import auc, roc_curve
 
 from gleams import config
@@ -343,7 +344,8 @@ class Embedder:
                         self.num_gpu)
             self.siamese_model = self._build_siamese_model()
             # Train using Adam to optimize the contrastive loss.
-            self.siamese_model.compile(Adam(self.lr), contrastive_loss)
+            self.siamese_model.compile(RectifiedAdam(self.lr),
+                                       contrastive_loss)
 
     def train(self, train_generator: data_generator.PairSequence,
               steps_per_epoch: int = None, num_epochs: int = 1,
