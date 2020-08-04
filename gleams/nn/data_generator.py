@@ -148,7 +148,7 @@ class EncodingsSequence(Sequence):
         int
             The number of batches.
         """
-        return int(math.ceil(len(self.encodings) / self.batch_size))
+        return int(math.ceil(self.encodings.shape[0] / self.batch_size))
 
     def __getitem__(self, idx: int)\
             -> List[np.ndarray]:

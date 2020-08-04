@@ -4,6 +4,7 @@ import math
 import numba as nb
 import numpy as np
 import scipy.sparse as ss
+import scipy.sparse.linalg
 from spectrum_utils.spectrum import MsmsSpectrum
 
 from gleams import config
@@ -146,7 +147,7 @@ def to_vector(spectrum_mz: np.ndarray, spectrum_intensity: np.ndarray,
     vector = ss.csr_matrix(
         (spectrum_intensity, (np.repeat(0, len(spectrum_intensity)), bins)),
         shape=(1, num_bins), dtype=np.float32)
-    return vector / ss.linalg.norm(vector)
+    return vector / scipy.sparse.linalg.norm(vector)
 
 
 @nb.njit
