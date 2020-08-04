@@ -3,13 +3,13 @@ import os
 
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras
 from tensorflow.keras import backend as K
 from tensorflow.keras import Input
 from tensorflow.keras.callbacks import Callback, CSVLogger, ModelCheckpoint
 from tensorflow.keras.layers import concatenate, Conv1D, Dense, Flatten, \
     Lambda, MaxPooling1D, Reshape
 from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers import Adam
 from tensorflow_addons.optimizers import RectifiedAdam
 from sklearn.metrics import auc, roc_curve
 
@@ -115,7 +115,11 @@ class Embedder:
         self.filename = filename
 
         self.siamese_model = None
-        self.num_gpu = 0
+        strategy = tf.distribute.MirroredStrategy()
+        with strategy.scope():
+            self.num_gpu = strategy.num_replicas_in_sync
+            logger.info('Running the embedder model on %d GPU(s)',
+                        self.num_gpu)
 
     def _get_embedder_model(self) -> Model:
         """
@@ -138,15 +142,17 @@ class Embedder:
         if self.siamese_model is None:
             raise ValueError('The embedder model has not been constructed yet')
         else:
-            self._get_embedder_model().save_weights(self.filename)
+            self._get_embedder_model().save(self.filename)
 
     def load(self) -> None:
         """
-        Create the Siamese model and set previously stored weights for its
-        embedder model.
+        Load a previously trained Embedder model.
         """
-        self.build()
-        self._get_embedder_model().load_weights(self.filename)
+        strategy = tf.distribute.MirroredStrategy()
+        with strategy.scope():
+            custom_loss = {'contrastive_loss': contrastive_loss}
+            with keras.utils.custom_object_scope(custom_loss):
+                self.siamese_model = keras.models.load_model(self.filename)
 
     def _build_embedder_model(self) -> Model:
         """
@@ -327,9 +333,6 @@ class Embedder:
         # i.e. the weights are tied.
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
-            self.num_gpu = strategy.num_replicas_in_sync
-            logger.info('Running the embedder model on %d GPU(s)',
-                        self.num_gpu)
             self.siamese_model = self._build_siamese_model()
             # Train using Adam to optimize the contrastive loss.
             self.siamese_model.compile(RectifiedAdam(self.lr),
