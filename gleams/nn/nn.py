@@ -171,14 +171,14 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                 os.remove(filename_embedding.replace('.npy', f'_{i}.npy'))
 
 
-def _embed_and_save(encodings: List[np.ndarray], batch_size: int,
+def _embed_and_save(encodings: List[ss.csr_matrix], batch_size: int,
                     emb: embedder.Embedder, filename: str) -> None:
     """
     Embed the given encodings and save them as a NumPy file.
 
     Parameters
     ----------
-    encodings : List[np.ndarray]
+    encodings : List[ss.csr_matrix]
         A list of encoding arrays to be embedded.
     batch_size : int
         The number of encodings to embed simultaneously.

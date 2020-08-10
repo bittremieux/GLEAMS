@@ -26,7 +26,7 @@ class SpectrumEncoder(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def encode(self, spec: MsmsSpectrum) -> np.ndarray:
+    def encode(self, spec: MsmsSpectrum) -> ss.csr_matrix:
         """
         Encode the given spectrum.
 
@@ -37,7 +37,7 @@ class SpectrumEncoder(metaclass=abc.ABCMeta):
 
         Returns
         -------
-        np.ndarray
+        ss.csr_matrix
             Encoded spectrum features.
         """
         pass

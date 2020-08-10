@@ -20,7 +20,7 @@ logger = logging.getLogger('gleams')
 def _peaks_to_features(dataset: str, filename: str,
                        metadata: Optional[pd.DataFrame],
                        enc: encoder.SpectrumEncoder)\
-        -> Tuple[str, Optional[pd.DataFrame], Optional[List[np.ndarray]]]:
+        -> Tuple[str, Optional[pd.DataFrame], Optional[List[ss.csr_matrix]]]:
     """
     Convert the spectra with the given identifiers in the given file to a
     feature array.
@@ -40,7 +40,7 @@ def _peaks_to_features(dataset: str, filename: str,
 
     Returns
     -------
-    Tuple[str, Optional[pd.DataFrame], Optional[List[np.ndarray]]]
+    Tuple[str, Optional[pd.DataFrame], Optional[List[ss.csr_matrix]]]
         A tuple of length 3 containing: the name of the file that has been
         converted, information about the converted spectra (scan number,
         precursor charge, and precursor m/z), the converted spectra.
