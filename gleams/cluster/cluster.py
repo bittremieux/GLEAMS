@@ -168,12 +168,13 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
                 if num_index_embeddings == 0:
                     continue
+                if num_index_embeddings < 10e2:
+                    # Use a brute-force index instead of an ANN index
+                    # when there are only a few items.
+                    num_list = -1
                 elif num_index_embeddings < 10e5:
-                    # FIXME: A brute-force index might be better if there are
-                    #  too few embeddings.
-                    # Ceil to avoid zero.
-                    num_list = math.ceil(2**math.floor(math.log2(
-                        num_index_embeddings / 39)))
+                    num_list = 2**math.floor(math.log2(
+                        num_index_embeddings / 39))
                 elif num_index_embeddings < 10e6:
                     num_list = 2**16
                 elif num_index_embeddings < 10e7:
@@ -190,9 +191,13 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 # Large datasets won't fit in the GPU memory,
                 # so we first train the index on the CPU.
                 index_embeddings = embeddings[index_embeddings_ids]
-                index_cpu = faiss.IndexIVFFlat(
-                    faiss.IndexFlatL2(config.embedding_size),
-                    config.embedding_size, num_list, faiss.METRIC_L2)
+                if num_list <= 0:
+                    index_cpu = faiss.IndexIDMap(
+                        faiss.IndexFlatL2(config.embedding_size))
+                else:
+                    index_cpu = faiss.IndexIVFFlat(
+                        faiss.IndexFlatL2(config.embedding_size),
+                        config.embedding_size, num_list, faiss.METRIC_L2)
                 index_cpu.train(index_embeddings)
                 # Add the embeddings to the index using the GPU for increased
                 # performance. Shard the GPU index over all available GPUs.
@@ -206,6 +211,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 co.reserveVecs = num_index_embeddings
                 # TODO: Reuse GPU resources.
                 index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
+                index_cpu.reset()
                 # Add the embeddings in batches
                 # to avoid exhausting the GPU memory.
                 batch_size = config.batch_size_add
@@ -215,24 +221,12 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                     index_gpu.add_with_ids(
                         index_embeddings[batch_start:batch_stop],
                         index_embeddings_ids[batch_start:batch_stop])
-                # Combine the sharded index into a single index and save.
+                # Save the index to disk.
                 logger.debug('Save the ANN index to file %s',
                              index_filename.format(charge, mz))
-                # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
-                if hasattr(index_gpu, 'at'):    # Sharded index.
-                    for i in range(index_gpu.count()):
-                        index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
-                        index_src.copy_subset_to(
-                            index_cpu, 0, 0,
-                            int(precursors_charge.index.max()))
-                        index_gpu.at(i).reset()
-                else:       # Standard index.
-                    index_src = faiss.index_gpu_to_cpu(index_gpu)
-                    index_src.copy_subset_to(
-                        index_cpu, 0, 0, int(precursors_charge.index.max()))
-                    index_gpu.reset()
-                faiss.write_index(index_cpu, index_filename.format(charge, mz))
-                index_cpu.reset()
+                faiss.write_index(faiss.index_gpu_to_cpu(index_gpu),
+                                  index_filename.format(charge, mz))
+                index_gpu.reset()
 
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
@@ -304,19 +298,15 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     """
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
     index_cpu = faiss.read_index(index_filename)
-    co = faiss.GpuClonerOptions()
+    co = faiss.GpuMultipleClonerOptions()
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
+    co.shard = False
     # TODO: Reuse GPU resources.
     index = faiss.index_cpu_to_all_gpus(index_cpu, co)
-    if hasattr(index, 'at'):
-        for i in range(index.count()):
-            simple_index = faiss.downcast_index(index.at(i))
-            simple_index.nprobe = min(
-                math.ceil(simple_index.nlist / 2), config.num_probe)
-    else:
+    if type(index) != faiss.swigfaiss.IndexIDMap:
         index.nprobe = min(math.ceil(index.nlist / 2), config.num_probe)
     return index
 
