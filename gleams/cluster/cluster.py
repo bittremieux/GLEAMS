@@ -65,7 +65,7 @@ def compute_pairwise_distances(embeddings_filename: str,
         os.mkdir(ann_dir)
     index_filename = os.path.splitext(
         os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_')
-    index_filename = os.path.join(ann_dir, index_filename + '_{}.faiss')
+    index_filename = os.path.join(ann_dir, index_filename + '_{}_{}.faiss')
     dist_filename = (os.path.splitext(
         os.path.basename(embeddings_filename))[0].replace('embed_', 'dist_'))
     dist_filename = os.path.join(cluster_dir, f'{dist_filename}.npz')
@@ -74,15 +74,15 @@ def compute_pairwise_distances(embeddings_filename: str,
     if os.path.isfile(dist_filename):
         return
     embeddings = np.load(embeddings_filename, mmap_mode='r')
-    precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
-                     .squeeze().sort_values())
-    min_mz, max_mz = precursor_mzs.min(), precursor_mzs.max()
+    precursors = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])
+                  .sort_values(['charge', 'mz']))
+    min_mz, max_mz = precursors['mz'].min(), precursors['mz'].max()
     mz_splits = np.arange(
         math.floor(min_mz / config.mz_interval) * config.mz_interval,
         math.ceil(max_mz / config.mz_interval) * config.mz_interval,
         config.mz_interval)
     # Create the ANN indexes (if this hasn't been done yet).
-    _build_ann_index(index_filename, embeddings, precursor_mzs, mz_splits)
+    _build_ann_index(index_filename, embeddings, precursors, mz_splits)
     # Calculate pairwise distances.
     num_embeddings = embeddings.shape[0]
     logging.info('Compute pairwise distances between neighboring embeddings '
@@ -122,7 +122,7 @@ def compute_pairwise_distances(embeddings_filename: str,
 
 
 def _build_ann_index(index_filename: str, embeddings: np.ndarray,
-                     precursor_mzs: pd.Series, mz_splits: np.ndarray) -> None:
+                     precursors: pd.DataFrame, mz_splits: np.ndarray) -> None:
     """
     Create ANN indexes for the given embedding vectors.
 
@@ -136,92 +136,101 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         splits will be created.
     embeddings: np.ndarray
         The embedding vectors to build the ANN index.
-    precursor_mzs: pd.Series
-        Precursor m/z's corresponding to the embedding vectors used to split
-        the embeddings over multiple ANN indexes.
+    precursors : pd.DataFrame
+        Precursor charges and m/z's corresponding to the embedding vectors used
+        to split the embeddings over multiple ANN indexes per charge and m/z
+        interval.
     mz_splits: np.ndarray
         M/z splits used to create separate ANN indexes.
     """
     logger.debug('Use %d GPUs for ANN index construction',
                  faiss.get_num_gpus())
-    # Create separate indexes for all embeddings with precursor m/z in the
-    # specified intervals.
-    for mz in tqdm.tqdm(mz_splits, desc='Indexes built', unit='index'):
-        if os.path.isfile(index_filename.format(mz)):
-            continue
-        # Create an ANN index using Euclidean distance for fast NN queries.
-        index_embeddings_ids = _get_precursor_mz_interval_ids(
-            precursor_mzs, mz, config.mz_interval,
-            config.precursor_tol_mode, config.precursor_tol_mass)
-        num_index_embeddings = len(index_embeddings_ids)
-        # Figure out a decent value for the num_list hyperparameter based on
-        # the number of embeddings. Rules of thumb from the Faiss wiki:
-        # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
-        if num_index_embeddings == 0:
-            continue
-        elif num_index_embeddings < 10e5:
-            # FIXME: A brute-force index might be better if there are too few
-            #  embeddings.
-            # Ceil to avoid zero.
-            num_list = math.ceil(2**math.floor(math.log2(
-                num_index_embeddings / 39)))
-        elif num_index_embeddings < 10e6:
-            num_list = 2**16
-        elif num_index_embeddings < 10e7:
-            num_list = 2**18
-        else:
-            num_list = 2**20
-            if num_index_embeddings > 10e8:
-                logger.warning('More than 1B embeddings to be indexed, '
-                               'consider decreasing the ANN size')
-        logger.debug('Build the ANN index for precursor m/z %d–%d '
-                     '(%d embeddings, %d lists)', mz, mz + config.mz_interval,
-                     num_index_embeddings, num_list)
-        # Large datasets won't fit in the GPU memory, so we first train the
-        # index on the CPU.
-        index_embeddings = embeddings[index_embeddings_ids]
-        index_cpu = faiss.IndexIVFFlat(
-            faiss.IndexFlatL2(config.embedding_size),
-            config.embedding_size, num_list, faiss.METRIC_L2)
-        index_cpu.train(index_embeddings)
-        # Add the embeddings to the index using the GPU for increased
-        # performance. Shard the GPU index over all available GPUs.
-        logger.debug('Add %d embeddings to the ANN index',
-                     num_index_embeddings)
-        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
-        co = faiss.GpuMultipleClonerOptions()
-        co.shard = True
-        co.useFloat16 = True
-        co.useFloat16CoarseQuantizer = False
-        co.indicesOptions = faiss.INDICES_CPU
-        co.reserveVecs = num_index_embeddings
-        index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
-        # Add the embeddings in batches to avoid exhausting the GPU memory.
-        batch_size = config.batch_size_add
-        for batch_start in tqdm.tqdm(
-                range(0, num_index_embeddings, batch_size),
-                desc='Batches processed', leave=False, unit='batch'):
-            batch_stop = min(batch_start + batch_size, num_index_embeddings)
-            index_gpu.add_with_ids(
-                index_embeddings[batch_start:batch_stop],
-                index_embeddings_ids[batch_start:batch_stop])
-        # Combine the sharded index into a single index and save.
-        logger.debug('Save the ANN index to file %s',
-                     index_filename.format(mz))
-        # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
-        if hasattr(index_gpu, 'at'):    # Sharded index.
-            for i in range(index_gpu.count()):
-                index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
-                index_src.copy_subset_to(
-                    index_cpu, 0, 0, int(precursor_mzs.index.max()))
-                index_gpu.at(i).reset()
-        else:       # Standard index.
-            index_src = faiss.index_gpu_to_cpu(index_gpu)
-            index_src.copy_subset_to(
-                index_cpu, 0, 0, int(precursor_mzs.index.max()))
-            index_gpu.reset()
-        faiss.write_index(index_cpu, index_filename.format(mz))
-        index_cpu.reset()
+    # Create separate indexes per precursor charge and with precursor m/z in
+    # the specified intervals.
+    with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
+                   desc='Indexes built', unit='index') as progressbar:
+        for charge, precursors_charge in precursors.groupby('charge'):
+            for mz in mz_splits:
+                progressbar.update(1)
+                if os.path.isfile(index_filename.format(charge, mz)):
+                    continue
+                # Create an ANN index using Euclidean distance
+                # for fast NN queries.
+                index_embeddings_ids = _get_precursor_mz_interval_ids(
+                    precursors_charge['mz'], mz, config.mz_interval,
+                    config.precursor_tol_mode, config.precursor_tol_mass)
+                num_index_embeddings = len(index_embeddings_ids)
+                # Figure out a decent value for the num_list hyperparameter
+                # based on the number of embeddings.
+                # Rules of thumb from the Faiss wiki:
+                # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
+                if num_index_embeddings == 0:
+                    continue
+                elif num_index_embeddings < 10e5:
+                    # FIXME: A brute-force index might be better if there are
+                    #  too few embeddings.
+                    # Ceil to avoid zero.
+                    num_list = math.ceil(2**math.floor(math.log2(
+                        num_index_embeddings / 39)))
+                elif num_index_embeddings < 10e6:
+                    num_list = 2**16
+                elif num_index_embeddings < 10e7:
+                    num_list = 2**18
+                else:
+                    num_list = 2**20
+                    if num_index_embeddings > 10e8:
+                        logger.warning('More than 1B embeddings to be indexed,'
+                                       ' consider decreasing the ANN size')
+                logger.debug('Build the ANN index for precursor charge %d and '
+                             'precursor m/z %d–%d (%d embeddings, %d lists)',
+                             charge, mz, mz + config.mz_interval,
+                             num_index_embeddings, num_list)
+                # Large datasets won't fit in the GPU memory,
+                # so we first train the index on the CPU.
+                index_embeddings = embeddings[index_embeddings_ids]
+                index_cpu = faiss.IndexIVFFlat(
+                    faiss.IndexFlatL2(config.embedding_size),
+                    config.embedding_size, num_list, faiss.METRIC_L2)
+                index_cpu.train(index_embeddings)
+                # Add the embeddings to the index using the GPU for increased
+                # performance. Shard the GPU index over all available GPUs.
+                logger.debug('Add %d embeddings to the ANN index',
+                             num_index_embeddings)
+                # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
+                co = faiss.GpuMultipleClonerOptions()
+                co.shard = True
+                co.useFloat16 = True
+                co.useFloat16CoarseQuantizer = False
+                co.indicesOptions = faiss.INDICES_CPU
+                co.reserveVecs = num_index_embeddings
+                index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
+                # Add the embeddings in batches
+                # to avoid exhausting the GPU memory.
+                batch_size = config.batch_size_add
+                for batch_start in range(0, num_index_embeddings, batch_size):
+                    batch_stop = min(batch_start + batch_size,
+                                     num_index_embeddings)
+                    index_gpu.add_with_ids(
+                        index_embeddings[batch_start:batch_stop],
+                        index_embeddings_ids[batch_start:batch_stop])
+                # Combine the sharded index into a single index and save.
+                logger.debug('Save the ANN index to file %s',
+                             index_filename.format(charge, mz))
+                # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L544
+                if hasattr(index_gpu, 'at'):    # Sharded index.
+                    for i in range(index_gpu.count()):
+                        index_src = faiss.index_gpu_to_cpu(index_gpu.at(i))
+                        index_src.copy_subset_to(
+                            index_cpu, 0, 0,
+                            int(precursors_charge.index.max()))
+                        index_gpu.at(i).reset()
+                else:       # Standard index.
+                    index_src = faiss.index_gpu_to_cpu(index_gpu)
+                    index_src.copy_subset_to(
+                        index_cpu, 0, 0, int(precursors_charge.index.max()))
+                    index_gpu.reset()
+                faiss.write_index(index_cpu, index_filename.format(charge, mz))
+                index_cpu.reset()
 
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
