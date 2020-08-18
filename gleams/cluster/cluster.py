@@ -2,7 +2,7 @@ import itertools
 import logging
 import math
 import os
-from typing import List
+from typing import List, Tuple
 
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
@@ -156,9 +156,10 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                     continue
                 # Create an ANN index using Euclidean distance
                 # for fast NN queries.
-                index_embeddings_ids = _get_precursor_mz_interval_ids(
-                    precursors_charge['mz'], mz, config.mz_interval,
+                start_i, stop_i = _get_precursor_mz_interval_ids(
+                    precursors_charge['mz'].values, mz, config.mz_interval,
                     config.precursor_tol_mode, config.precursor_tol_mass)
+                index_embeddings_ids = precursors.index.values[start_i:stop_i]
                 num_index_embeddings = len(index_embeddings_ids)
                 # Figure out a decent value for the num_list hyperparameter
                 # based on the number of embeddings.
@@ -319,17 +320,19 @@ def _load_ann_index(index_filename: str, device: int) -> faiss.Index:
     return index
 
 
-def _get_precursor_mz_interval_ids(precursor_mzs: pd.Series, start_mz: float,
+@nb.njit
+def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
                                    mz_window: float, precursor_tol_mode: str,
-                                   precursor_tol_mass: float) -> np.ndarray:
+                                   precursor_tol_mass: float) -> \
+        Tuple[int, int]:
     """
     Get the IDs of the embeddings falling within the specified precursor m/z
     interval (taking a small margin for overlapping intervals into account).
 
     Parameters
     ----------
-    precursor_mzs : pd.Series
-        A Series with all precursor m/z's indexed by their IDs.
+    precursor_mzs : np.ndarray
+        Array of precursor m/z's ordered by their identifiers.
     start_mz : float
         The lower end of the m/z interval.
     mz_window : float
@@ -341,9 +344,9 @@ def _get_precursor_mz_interval_ids(precursor_mzs: pd.Series, start_mz: float,
 
     Returns
     -------
-    np.ndarray
-        The IDS of the embeddings falling with the specified precursor m/z
-        interval.
+    Tuple[int, int]
+        The start and stop index of the embedding identifiers falling within
+        the specified precursor m/z interval.
     """
     if precursor_tol_mode == 'Da':
         margin = precursor_tol_mass
@@ -354,7 +357,7 @@ def _get_precursor_mz_interval_ids(precursor_mzs: pd.Series, start_mz: float,
     margin = max(margin, mz_window / 100)
     idx = np.searchsorted(
         precursor_mzs, [start_mz - margin, start_mz + mz_window + margin])
-    return precursor_mzs.index.values[idx[0]:idx[1]]
+    return idx[0], idx[1]
 
 
 def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
