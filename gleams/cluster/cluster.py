@@ -93,18 +93,19 @@ def compute_pairwise_distances(embeddings_filename: str,
     neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
     distances = np.full(num_embeddings * config.num_neighbors, np.nan,
                         np.float32)
-    joblib.Parallel(faiss.get_num_gpus() * 2, 'threading')(
-        joblib.delayed(_dist_mz_interval)(
-            index_filename, embeddings, precursor_mzs, distances, neighbors,
-            mz, gpu_i) for mz, gpu_i in tqdm.tqdm(
-                zip(mz_splits, itertools.cycle(range(faiss.get_num_gpus()))),
-                desc='Precursor m/z intervals processed', total=len(mz_splits),
-                unit='interval'))
+    with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
+                   desc='Distances calculated', unit='index') as progressbar:
+        for charge, precursors_charge in precursors.groupby('charge'):
+            for mz in mz_splits:
+                _dist_mz_interval(
+                    index_filename, embeddings, precursors_charge['mz'],
+                    distances, neighbors, charge, mz)
+                progressbar.update(1)
     mask = np.where(~np.isnan(distances))[0]
     np.save(neighbors_filename.format(1), neighbors[mask])
     np.save(neighbors_filename.format('distance'), distances[mask])
     np.save(neighbors_filename.format(0),
-            np.repeat(np.asarray(precursor_mzs.index.sort_values(),
+            np.repeat(np.asarray(precursors.index.sort_values(),
                                  dtype=np.uint32), config.num_neighbors)[mask])
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
@@ -199,11 +200,11 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                              num_index_embeddings)
                 # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
                 co = faiss.GpuMultipleClonerOptions()
-                co.shard = True
                 co.useFloat16 = True
                 co.useFloat16CoarseQuantizer = False
                 co.indicesOptions = faiss.INDICES_CPU
                 co.reserveVecs = num_index_embeddings
+                # TODO: Reuse GPU resources.
                 index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
                 # Add the embeddings in batches
                 # to avoid exhausting the GPU memory.
@@ -236,7 +237,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
                       precursor_mzs: pd.Series, distances: np.ndarray,
-                      neighbors: np.ndarray, mz: int, gpu_i: int) -> None:
+                      neighbors: np.ndarray, charge: int, mz: int) -> None:
     """
     Compute distances to the nearest neighbors for the given precursor m/z
     interval.
@@ -254,17 +255,18 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         The nearest neighbor distances.
     neighbors : np.ndarray
         The nearest neighbor indexes.
+    charge : int
+        The active precursor charge to load the ANN index.
     mz : int
-        The active precursor m/z split.
-    gpu_i : int
-        The GPU device number.
+        The active precursor m/z split to load the ANN index.
     """
-    if not os.path.isfile(index_filename.format(mz)):
+    if not os.path.isfile(index_filename.format(charge, mz)):
         return
-    index = _load_ann_index(index_filename.format(mz), gpu_i)
-    interval_ids = _get_precursor_mz_interval_ids(
-        precursor_mzs, mz, config.mz_interval,
+    index = _load_ann_index(index_filename.format(charge, mz))
+    start_i, stop_i = _get_precursor_mz_interval_ids(
+        precursor_mzs.values, mz, config.mz_interval,
         config.precursor_tol_mode, config.precursor_tol_mass)
+    interval_ids = precursor_mzs.index.values[start_i:stop_i]
     interval_len = len(interval_ids)
     batch_size = min(interval_len, config.batch_size_dist)
     for batch_start in range(0, interval_len, batch_size):
@@ -286,7 +288,7 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
     index.reset()
 
 
-def _load_ann_index(index_filename: str, device: int) -> faiss.Index:
+def _load_ann_index(index_filename: str) -> faiss.Index:
     """
     Load the ANN index from the given file and move it to the GPU(s).
 
@@ -301,15 +303,14 @@ def _load_ann_index(index_filename: str, device: int) -> faiss.Index:
         The Faiss `Index`.
     """
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
-    # logger.debug('Load the ANN index from file %s', index_filename)
     index_cpu = faiss.read_index(index_filename)
-    res = faiss.StandardGpuResources()
     co = faiss.GpuClonerOptions()
     co.useFloat16 = True
     co.useFloat16CoarseQuantizer = False
     co.indicesOptions = faiss.INDICES_CPU
     co.reserveVecs = index_cpu.ntotal
-    index = faiss.index_cpu_to_gpu(res, device, index_cpu, co)
+    # TODO: Reuse GPU resources.
+    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
     if hasattr(index, 'at'):
         for i in range(index.count()):
             simple_index = faiss.downcast_index(index.at(i))
