@@ -189,19 +189,17 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                              'precursor m/z %d–%d (%d embeddings, %d lists)',
                              charge, mz, mz + config.mz_interval,
                              num_index_embeddings, num_list)
-                # Large datasets won't fit in the GPU memory,
-                # so we first train the index on the CPU.
-                index_embeddings = embeddings[index_embeddings_ids]
+                # Create a suitable index and compute cluster centroids.
                 if num_list <= 0:
-                    index_cpu = faiss.IndexIDMap(
+                    index = faiss.IndexIDMap(
                         faiss.IndexFlatL2(config.embedding_size))
                 else:
-                    index_cpu = faiss.IndexIVFFlat(
+                    index = faiss.IndexIVFFlat(
                         faiss.IndexFlatL2(config.embedding_size),
                         config.embedding_size, num_list, faiss.METRIC_L2)
-                index_cpu.train(index_embeddings)
-                # Add the embeddings to the index using the GPU for increased
-                # performance. Shard the GPU index over all available GPUs.
+                index_embeddings = embeddings[index_embeddings_ids]
+                index.train(index_embeddings)
+                # Add the embeddings to the index in batches.
                 logger.debug('Add %d embeddings to the ANN index',
                              num_index_embeddings)
                 # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
