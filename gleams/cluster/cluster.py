@@ -271,7 +271,7 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
 
 def _load_ann_index(index_filename: str) -> faiss.Index:
     """
-    Load the ANN index from the given file and move it to the GPU(s).
+    Load the ANN index from the given file.
 
     Parameters
     ----------
