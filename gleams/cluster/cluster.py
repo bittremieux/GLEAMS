@@ -303,7 +303,7 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
     Parameters
     ----------
     precursor_mzs : np.ndarray
-        Array of precursor m/z's ordered by their identifiers.
+        Array of sorted precursor m/z's.
     start_mz : float
         The lower end of the m/z interval.
     mz_window : float
