@@ -284,16 +284,9 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
         The Faiss `Index`.
     """
     # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
-    index_cpu = faiss.read_index(index_filename)
-    co = faiss.GpuMultipleClonerOptions()
-    co.useFloat16 = True
-    co.useFloat16CoarseQuantizer = False
-    co.indicesOptions = faiss.INDICES_CPU
-    co.reserveVecs = index_cpu.ntotal
-    co.shard = False
-    # TODO: Reuse GPU resources.
-    index = faiss.index_cpu_to_all_gpus(index_cpu, co)
-    if type(index) != faiss.swigfaiss.IndexIDMap:
+    index = faiss.read_index(index_filename)
+    # IndexIVF has a `nprobe` hyperparameter, flat indexes don't.
+    if hasattr(index, 'nprobe'):
         index.nprobe = min(math.ceil(index.nlist / 2), config.num_probe)
     return index
 
