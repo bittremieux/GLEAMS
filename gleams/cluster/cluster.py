@@ -283,7 +283,6 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     faiss.Index
         The Faiss `Index`.
     """
-    # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L608
     index = faiss.read_index(index_filename)
     # IndexIVF has a `nprobe` hyperparameter, flat indexes don't.
     if hasattr(index, 'nprobe'):
