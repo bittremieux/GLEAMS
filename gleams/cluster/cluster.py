@@ -160,7 +160,8 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 start_i, stop_i = _get_precursor_mz_interval_ids(
                     precursors_charge['mz'].values, mz, config.mz_interval,
                     config.precursor_tol_mode, config.precursor_tol_mass)
-                index_embeddings_ids = precursors.index.values[start_i:stop_i]
+                index_embeddings_ids = (precursors_charge.index
+                                        .values[start_i:stop_i])
                 num_index_embeddings = len(index_embeddings_ids)
                 # Figure out a decent value for the num_list hyperparameter
                 # based on the number of embeddings.
