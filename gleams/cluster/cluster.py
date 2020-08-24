@@ -202,30 +202,18 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 # Add the embeddings to the index in batches.
                 logger.debug('Add %d embeddings to the ANN index',
                              num_index_embeddings)
-                # https://github.com/facebookresearch/faiss/blob/2cce2e5f59a5047aa9a1729141e773da9bec6b78/benchs/bench_gpu_1bn.py#L506
-                co = faiss.GpuMultipleClonerOptions()
-                co.useFloat16 = True
-                co.useFloat16CoarseQuantizer = False
-                co.indicesOptions = faiss.INDICES_CPU
-                co.reserveVecs = num_index_embeddings
-                # TODO: Reuse GPU resources.
-                index_gpu = faiss.index_cpu_to_all_gpus(index_cpu, co)
-                index_cpu.reset()
-                # Add the embeddings in batches
-                # to avoid exhausting the GPU memory.
-                batch_size = config.batch_size_add
+                batch_size = min(num_index_embeddings, config.batch_size_add)
                 for batch_start in range(0, num_index_embeddings, batch_size):
                     batch_stop = min(batch_start + batch_size,
                                      num_index_embeddings)
-                    index_gpu.add_with_ids(
+                    index.add_with_ids(
                         index_embeddings[batch_start:batch_stop],
                         index_embeddings_ids[batch_start:batch_stop])
                 # Save the index to disk.
                 logger.debug('Save the ANN index to file %s',
                              index_filename.format(charge, mz))
-                faiss.write_index(faiss.index_gpu_to_cpu(index_gpu),
-                                  index_filename.format(charge, mz))
-                index_gpu.reset()
+                faiss.write_index(index, index_filename.format(charge, mz))
+                index.reset()
 
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
