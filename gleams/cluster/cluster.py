@@ -187,7 +187,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                                        ' consider decreasing the ANN size')
                 logger.debug('Build the ANN index for precursor charge %d and '
                              'precursor m/z %d–%d (%d embeddings, %d lists)',
-                             charge, mz, mz + config.mz_interval,
+                             charge, int(mz), int(mz + config.mz_interval),
                              num_index_embeddings, num_list)
                 # Create a suitable index and compute cluster centroids.
                 if num_list <= 0:
