@@ -426,7 +426,8 @@ def cluster(distances_filename: str, metadata_filename: str):
     logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
-    dbscan = DBSCAN(config.eps, config.min_samples, 'precomputed', n_jobs=-1)
+    dbscan = DBSCAN(config.eps, min_samples=config.min_samples,
+                    metric='precomputed', n_jobs=-1)
     clusters = dbscan.fit_predict(ss.load_npz(distances_filename))
     logger.debug('Finetune cluster assignments to not exceed %d %s precursor '
                  'm/z tolerance', config.precursor_tol_mass,
