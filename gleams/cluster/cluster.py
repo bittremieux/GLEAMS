@@ -445,7 +445,8 @@ def cluster(distances_filename: str, metadata_filename: str):
         # higher `min_samples`.
         if len(clust) > 1:
             cluster_mzs = clust['mz'].values.reshape(-1, 1)
-            pairwise_mz_diff = pairwise_distances(cluster_mzs)    # Dalton.
+            # Pairwise differences in Dalton.
+            pairwise_mz_diff = pairwise_distances(cluster_mzs, n_jobs=-1)
             if config.precursor_tol_mode == 'ppm':
                 pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
             # Group items within the cluster based on their precursor m/z.
