@@ -1,4 +1,3 @@
-import itertools
 import logging
 import math
 import os
@@ -7,7 +6,6 @@ from typing import List, Tuple
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
 import faiss
-import joblib
 import numba as nb
 import numexpr as ne
 import numpy as np
