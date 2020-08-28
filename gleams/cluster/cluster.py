@@ -439,7 +439,10 @@ def cluster(distances_filename: str, metadata_filename: str):
     metadata['cluster'] = clusters
     cluster_labels, current_label = np.full_like(clusters, -1), 0
     for _, clust in metadata[metadata['cluster'] != -1].groupby('cluster'):
-        if len(clust) > 1:  # No splitting possible if only 1 item in cluster.
+        # No splitting possible if only 1 item in cluster.
+        # This seems to happen sometimes despite that DBSCAN requires a
+        # higher `min_samples`.
+        if len(clust) > 1:
             cluster_mzs = clust['mz'].values.reshape(-1, 1)
             pairwise_mz_diff = pairwise_distances(cluster_mzs)    # Dalton.
             if config.precursor_tol_mode == 'ppm':
@@ -447,12 +450,16 @@ def cluster(distances_filename: str, metadata_filename: str):
             # Group items within the cluster based on their precursor m/z.
             # Precursor m/z's within a single group can't exceed the specified
             # precursor m/z tolerance (`distance_threshold` above).
-            mz_clusters = pd.Series(mz_clusterer.fit_predict(pairwise_mz_diff),
-                                    clust.index)
+            mz_cluster_labels = mz_clusterer.fit_predict(pairwise_mz_diff)
             # Update cluster assignments.
-            for _, mz_cluster in mz_clusters.groupby(mz_clusters):
-                cluster_labels[mz_cluster.index] = current_label
+            if mz_clusterer.n_clusters_ == 1:
+                cluster_labels[clust.index] = current_label
                 current_label += 1
+            else:
+                mz_clusters = pd.Series(mz_cluster_labels, clust.index)
+                for _, mz_cluster in mz_clusters.groupby(mz_clusters):
+                    cluster_labels[mz_cluster.index] = current_label
+                    current_label += 1
         else:
             cluster_labels[clust.index] = current_label
             current_label += 1
