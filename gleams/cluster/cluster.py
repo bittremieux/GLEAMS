@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as ss
 import tqdm
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering, DBSCAN
+from sklearn.metrics import pairwise_distances
 
 from gleams import config
 
@@ -405,7 +406,7 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
             [:max_neighbors])
 
 
-def cluster(distances_filename: str):
+def cluster(distances_filename: str, metadata_filename: str):
     """
     DBSCAN clustering of the embeddings based on a pairwise distance matrix.
 
@@ -414,18 +415,49 @@ def cluster(distances_filename: str):
     distances_filename : str
         Precomputed pairwise distance matrix file to use for the DBSCAN
         clustering.
+    metadata_filename : str
+        Metadata file with precursor m/z information for all embeddings.
     """
     clusters_filename = (distances_filename.replace('dist_', 'clusters_')
                                            .replace('.npz', '.npy'))
     if os.path.isfile(clusters_filename):
         return
+    # DBSCAN clustering of the embeddings.
     logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
     dbscan = DBSCAN(config.eps, config.min_samples, 'precomputed', n_jobs=-1)
-    pairwise_distances = ss.load_npz(distances_filename)
-    clusters = dbscan.fit_predict(pairwise_distances)
+    clusters = dbscan.fit_predict(ss.load_npz(distances_filename))
+    logger.debug('Finetune cluster assignments to not exceed %d %s precursor '
+                 'm/z tolerance', config.precursor_tol_mass,
+                 config.precursor_tol_mode)
+    # Agglomerative clustering of the precursor m/z within each DBSCAN cluster.
+    mz_clusterer = AgglomerativeClustering(
+        n_clusters=None, affinity='precomputed', linkage='complete',
+        distance_threshold=config.precursor_tol_mass)
+    metadata = pd.read_parquet(metadata_filename, columns=['mz'])
+    metadata['cluster'] = clusters
+    cluster_labels, current_label = np.full_like(clusters, -1), 0
+    for _, clust in metadata[metadata['cluster'] != -1].groupby('cluster'):
+        if len(clust) > 1:  # No splitting possible if only 1 item in cluster.
+            cluster_mzs = clust['mz'].values.reshape(-1, 1)
+            pairwise_mz_diff = pairwise_distances(cluster_mzs)    # Dalton.
+            if config.precursor_tol_mode == 'ppm':
+                pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
+            # Group items within the cluster based on their precursor m/z.
+            # Precursor m/z's within a single group can't exceed the specified
+            # precursor m/z tolerance (`distance_threshold` above).
+            mz_clusters = pd.Series(mz_clusterer.fit_predict(pairwise_mz_diff),
+                                    clust.index)
+            # Update cluster assignments.
+            for _, mz_cluster in mz_clusters.groupby(mz_clusters):
+                cluster_labels[mz_cluster.index] = current_label
+                current_label += 1
+        else:
+            cluster_labels[clust.index] = current_label
+            current_label += 1
+    # Export the cluster assignments.
     logger.debug('%d embeddings partitioned in %d clusters',
-                 pairwise_distances.shape[0], len(np.unique(clusters)))
+                 len(cluster_labels), len(np.unique(cluster_labels)))
     logger.debug('Save the cluster assignments to file %s', clusters_filename)
-    np.save(clusters_filename, clusters)
+    np.save(clusters_filename, cluster_labels)
