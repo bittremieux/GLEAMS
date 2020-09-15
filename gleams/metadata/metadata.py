@@ -234,12 +234,12 @@ def generate_pairs_positive(metadata_filename: str) -> None:
     if not os.path.isfile(pairs_filename):
         logger.info('Generate positive pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = pd.read_parquet(metadata_filename,
-                                   columns=['sequence', 'charge'])
+        metadata = (pd.read_parquet(metadata_filename,
+                                    columns=['sequence', 'charge'])
+                    .reset_index().dropna())
         metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
-        metadata['row_num'] = range(len(metadata.index))
         same_row_nums = metadata.groupby(
-            ['sequence', 'charge'], as_index=False, sort=False)['row_num']
+            ['sequence', 'charge'], as_index=False, sort=False)['index']
         logger.debug('Save positive pair indexes to %s', pairs_filename)
         np.save(pairs_filename, np.asarray(
             [[np.uint32(p1), np.uint32(p2)]
@@ -283,12 +283,12 @@ def generate_pairs_negative(metadata_filename: str,
     if not os.path.isfile(pairs_filename):
         logger.info('Generate negative pair indexes for metadata file %s',
                     metadata_filename)
-        metadata = pd.read_parquet(metadata_filename,
-                                   columns=['sequence', 'charge', 'mz'])
-        metadata['row_num'] = range(len(metadata.index))
+        metadata = (pd.read_parquet(metadata_filename,
+                                    columns=['sequence', 'charge', 'mz'])
+                    .reset_index().dropna())
         metadata = (metadata.sort_values(['charge', 'mz'])
                     .reset_index(drop=True))
-        row_nums = metadata['row_num'].values
+        row_nums = metadata['index'].values
         mzs = metadata['mz'].values
         # List because Numba can't handle object (string) arrays.
         sequences = nb.typed.List(metadata['sequence'].str.replace('I', 'L')
