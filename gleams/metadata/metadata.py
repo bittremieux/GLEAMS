@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import subprocess
-from typing import Iterator, List
+from typing import Iterator, List, Optional, Tuple
 
 import joblib
 import numba as nb
@@ -22,7 +22,8 @@ regex_mod = re.compile('\+\d+.\d+')
 
 
 def convert_massivekb_metadata(massivekb_filename: str,
-                               metadata_filename: str) -> None:
+                               metadata_filename: str,
+                               charges: Optional[Tuple[int]] = None) -> None:
     """
     Convert the MassIVE-KB metadata file to a stripped down metadata file
     containing only the relevant information.
@@ -47,11 +48,17 @@ def convert_massivekb_metadata(massivekb_filename: str,
         The MassIVE-KB metadata file name.
     metadata_filename : str
         The metadata file name.
+    charges : Optional[Tuple[int]]
+        Optional tuple of minimum and maximum precursor charge (both inclusive)
+        to include, spectra with other precursor charges will be omitted.
     """
     if not os.path.isfile(metadata_filename):
         logger.info('Convert the MassIVE-KB metadata file')
         metadata = pd.read_csv(massivekb_filename, sep='\t', usecols=[
             'annotation', 'charge', 'filename', 'mz', 'scan'])
+        if charges is not None:
+            metadata = metadata[(metadata['charge'] >= charges[0]) &
+                                (metadata['charge'] <= charges[1])].copy()
         metadata = metadata.rename(columns={'annotation': 'sequence'})
         dataset_filename = metadata['filename'].str.split('/').str
         metadata['dataset'] = dataset_filename[0]

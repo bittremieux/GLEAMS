@@ -15,6 +15,7 @@ metadata_filename = os.path.join(
 model_filename = os.path.join(
     os.environ['GLEAMS_HOME'], 'data', 'model',
     f'gleams_{massivekb_task_id}.hdf5')
+charges = 2, 5
 val_ratio = 0.1
 test_ratio = 0.1
 split_ratio_tolerance = 0.01
