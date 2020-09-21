@@ -23,10 +23,13 @@ def _get_feature_split():
             config.num_precursor_features + config.num_fragment_features)
 
 
-def train_nn(filename_model: str, filename_feat_train: str,
-             filename_train_pairs_pos: str, filename_train_pairs_neg: str,
-             filename_feat_val: str, filename_val_pairs_pos: str,
-             filename_val_pairs_neg: str):
+def train_nn(filename_model: str,
+             filename_feat_train: str,
+             filenames_train_pairs_pos: List[str],
+             filenames_train_pairs_neg: List[str],
+             filename_feat_val: str,
+             filenames_val_pairs_pos: List[str],
+             filenames_val_pairs_neg: List[str]):
     """
     Train the GLEAMS neural network.
 
@@ -36,16 +39,16 @@ def train_nn(filename_model: str, filename_feat_train: str,
         The file name where the model will be saved.
     filename_feat_train : str
         The file name of the training SciPy sparse feature file.
-    filename_train_pairs_pos : str
-        The file name of the positive training pair indexes.
-    filename_train_pairs_neg : str
-        The file name of the negative training pair indexes.
+    filenames_train_pairs_pos : List[str]
+        The file names of the positive training pair indexes.
+    filenames_train_pairs_neg : List[str]
+        The file names of the negative training pair indexes.
     filename_feat_val : str
         The file name of the validation SciPy sparse feature file.
-    filename_val_pairs_pos : str
-        The file name of the positive validation pair indexes.
-    filename_val_pairs_neg : str
-        The file name of the negative validation pair indexes.
+    filenames_val_pairs_pos : List[str]
+        The file names of the positive validation pair indexes.
+    filenames_val_pairs_neg : List[str]
+        The file names of the negative validation pair indexes.
     """
     # Build the embedder model.
     model_dir = os.path.dirname(filename_model)
@@ -70,11 +73,11 @@ def train_nn(filename_model: str, filename_feat_train: str,
                     ' %d for running on %d GPUs', batch_size, steps_per_epoch,
                     emb.num_gpu)
     train_generator = data_generator.PairSequence(
-        filename_feat_train, filename_train_pairs_pos,
-        filename_train_pairs_neg, batch_size, _get_feature_split(),
+        filename_feat_train, filenames_train_pairs_pos,
+        filenames_train_pairs_neg, batch_size, _get_feature_split(),
         config.max_num_pairs_train)
     val_generator = data_generator.PairSequence(
-        filename_feat_val, filename_val_pairs_pos, filename_val_pairs_neg,
+        filename_feat_val, filenames_val_pairs_pos, filenames_val_pairs_neg,
         batch_size, _get_feature_split(), config.max_num_pairs_val, False)
     emb.train(train_generator, steps_per_epoch, config.num_epochs,
               val_generator)
