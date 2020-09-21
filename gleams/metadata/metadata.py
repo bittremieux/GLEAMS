@@ -263,9 +263,8 @@ def generate_pairs_positive(metadata_filename: str,
                 dtype=np.uint32))
 
 
-def generate_pairs_negative(metadata_filename: str,
-                            mz_tolerance: float,
-                            fragment_tolerance: float,
+def generate_pairs_negative(metadata_filename: str, charges: Tuple[int],
+                            mz_tolerance: float, fragment_tolerance: float,
                             matching_fragments_threshold: float) \
         -> None:
     """
@@ -274,15 +273,18 @@ def generate_pairs_negative(metadata_filename: str,
 
     The negative training pairs consist of all pairs with a different peptide
     sequence, a precursor m/z difference smaller than the given m/z tolerance,
-    and mostly non-overlapping b and y ions..
+    and mostly non-overlapping b and y ions, split by precursor charge.
     Pairs of row numbers in the metadata file for each negative pair are stored
-    in Parquet file `{metadata_filename}_pairs_neg.parquet`.
-    If this file already exists it will _not_ be recreated.
+    in Parquet file `{metadata_filename}_pairs_neg_{charge}.parquet`.
+    If these files already exists they will _not_ be recreated.
 
     Parameters
     ----------
     metadata_filename : str
         The metadata file name. Should be a Parquet file.
+    charges : Tuple[int]
+        Tuple of minimum and maximum precursor charge (both inclusive) to
+        include, spectra with other precursor charges will be omitted.
     mz_tolerance : float
         Maximum precursor m/z tolerance in ppm for two PSMs to be considered a
         negative pair.
@@ -294,27 +296,29 @@ def generate_pairs_negative(metadata_filename: str,
         ions of shortest peptide to be considered a negative pair (to avoid
         overly similar negative pairs).
     """
-    pairs_filename = metadata_filename.replace('.parquet', '_pairs_neg.npy')
-    if not os.path.isfile(pairs_filename):
-        logger.info('Generate negative pair indexes for metadata file %s',
-                    metadata_filename)
-        metadata = (pd.read_parquet(metadata_filename,
-                                    columns=['sequence', 'charge', 'mz'])
-                    .reset_index().dropna())
-        metadata = (metadata.sort_values(['charge', 'mz'])
-                    .reset_index(drop=True))
-        row_nums = metadata['index'].values
-        mzs = metadata['mz'].values
-        # List because Numba can't handle object (string) arrays.
-        sequences = nb.typed.List(metadata['sequence'].str.replace('I', 'L')
-                                  .apply(_remove_mod))
-        fragments = nb.typed.List(metadata['sequence']
-                                  .apply(_get_theoretical_fragment_mzs))
-        logger.debug('Save negative pair indexes to %s', pairs_filename)
-        np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
-            row_nums, mzs, sequences, fragments, mz_tolerance,
-            fragment_tolerance, matching_fragments_threshold), np.uint32)
-                .reshape((-1, 2)))
+    metadata = (pd.read_parquet(metadata_filename,
+                                columns=['sequence', 'charge', 'mz'])
+                .reset_index().dropna()
+                .sort_values(['charge', 'mz']).reset_index(drop=True))
+    for charge in charges:
+        pairs_filename = metadata_filename.replace('.parquet',
+                                                   f'_pairs_neg_{charge}.npy')
+        if not os.path.isfile(pairs_filename):
+            logger.info('Generate negative pair indexes for charge %d from '
+                        'metadata file %s', charge, metadata_filename)
+            metadata_charge = metadata[metadata['charge'] == charge]
+            # List because Numba can't handle object (string) arrays.
+            sequences = nb.typed.List(
+                metadata['sequence'].str.replace('I', 'L').apply(_remove_mod))
+            fragments = nb.typed.List(metadata['sequence']
+                                      .apply(_get_theoretical_fragment_mzs))
+            logger.debug('Save negative pair indexes for charge %d to file %s',
+                         charge, pairs_filename)
+            np.save(pairs_filename, np.fromiter(_generate_pairs_negative(
+                metadata_charge['index'].values, metadata_charge['mz'].values,
+                sequences, fragments, mz_tolerance, fragment_tolerance,
+                matching_fragments_threshold), np.uint32)
+                    .reshape((-1, 2)))
 
 
 @functools.lru_cache(None)
