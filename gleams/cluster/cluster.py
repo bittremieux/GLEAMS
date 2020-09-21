@@ -89,33 +89,38 @@ def compute_pairwise_distances(embeddings_filename: str,
                  config.num_neighbors)
     if num_embeddings > np.iinfo(np.uint32).max:
         raise OverflowError('Too many embedding indexes to fit into uint32')
-    neighbors = np.empty((num_embeddings * config.num_neighbors), np.uint32)
-    distances = np.full(num_embeddings * config.num_neighbors, np.nan,
-                        np.float32)
-    with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
-                   desc='Distances calculated', unit='index') as progressbar:
-        for charge, precursors_charge in precursors.groupby('charge'):
-            for mz in mz_splits:
-                _dist_mz_interval(
-                    index_filename, embeddings, precursors_charge['mz'],
-                    distances, neighbors, charge, mz)
-                progressbar.update(1)
-    mask = np.where(~np.isnan(distances))[0]
-    np.save(neighbors_filename.format(1), neighbors[mask])
-    np.save(neighbors_filename.format('distance'), distances[mask])
-    np.save(neighbors_filename.format(0),
-            np.repeat(np.asarray(precursors.index.sort_values(),
-                                 dtype=np.uint32), config.num_neighbors)[mask])
+    if (not os.path.isfile(neighbors_filename.format('distance')) or
+            not os.path.isfile(neighbors_filename.format(0)) or
+            not os.path.isfile(neighbors_filename.format(1))):
+        neighbors = np.empty((num_embeddings * config.num_neighbors),
+                             np.uint32)
+        distances = np.full(num_embeddings * config.num_neighbors, np.nan,
+                            np.float32)
+        with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
+                       desc='Distances calculated', unit='index') as pbar:
+            for charge, precursors_charge in precursors.groupby('charge'):
+                for mz in mz_splits:
+                    _dist_mz_interval(
+                        index_filename, embeddings, precursors_charge['mz'],
+                        distances, neighbors, charge, mz)
+                    pbar.update(1)
+        mask = np.where(~np.isnan(distances))[0]
+        np.save(neighbors_filename.format(1), neighbors[mask])
+        np.save(neighbors_filename.format('distance'), distances[mask])
+        np.save(neighbors_filename.format(0),
+                np.repeat(np.asarray(precursors.index.sort_values(),
+                                     dtype=np.uint32),
+                          config.num_neighbors)[mask])
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
-    pairwise_distances = ss.csr_matrix(
+    pairwise_dist_matrix = ss.csr_matrix(
         (np.load(neighbors_filename.format('distance'), mmap_mode='r'),
          (np.load(neighbors_filename.format(0), mmap_mode='r'),
           np.load(neighbors_filename.format(1), mmap_mode='r'))),
         (num_embeddings, num_embeddings), np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
-    ss.save_npz(dist_filename, pairwise_distances, False)
+    ss.save_npz(dist_filename, pairwise_dist_matrix, False)
     os.remove(neighbors_filename.format(0))
     os.remove(neighbors_filename.format(1))
     os.remove(neighbors_filename.format('distance'))
