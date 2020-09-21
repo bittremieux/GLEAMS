@@ -221,38 +221,46 @@ def download_massivekb_peaks(massivekb_filename: str) -> None:
                                for filename in filenames)
 
 
-def generate_pairs_positive(metadata_filename: str) -> None:
+def generate_pairs_positive(metadata_filename: str,
+                            charges: Tuple[int]) -> None:
     """
     Generate index pairs for positive training pairs for the given metadata
     file.
 
     The positive training pairs consist of all pairs with the same peptide
-    sequence in the metadata. Identity pairs are included.
+    sequence in the metadata, split by precursor charge. Identity pairs are
+    included.
     Pairs of row numbers in the metadata file for each positive pair are stored
-    in Parquet file `{metadata_filename}_pairs_pos.parquet`.
-    If this file already exists it will _not_ be recreated.
+    in Parquet file `{metadata_filename}_pairs_pos_{charge}.parquet`.
+    If these files already exists they will _not_ be recreated.
 
     Parameters
     ----------
     metadata_filename : str
         The metadata file name. Should be a Parquet file.
+    charges : Tuple[int]
+        Tuple of minimum and maximum precursor charge (both inclusive) to
+        include, spectra with other precursor charges will be omitted.
     """
-    pairs_filename = metadata_filename.replace('.parquet', '_pairs_pos.npy')
-    if not os.path.isfile(pairs_filename):
-        logger.info('Generate positive pair indexes for metadata file %s',
-                    metadata_filename)
-        metadata = (pd.read_parquet(metadata_filename,
-                                    columns=['sequence', 'charge'])
-                    .reset_index().dropna())
-        metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
-        same_row_nums = metadata.groupby(
-            ['sequence', 'charge'], as_index=False, sort=False)['index']
-        logger.debug('Save positive pair indexes to %s', pairs_filename)
-        np.save(pairs_filename, np.asarray(
-            [[np.uint32(p1), np.uint32(p2)]
-             for p1, p2 in itertools.chain(*(same_row_nums.apply(
-                functools.partial(itertools.combinations, r=2))))],
-            dtype=np.uint32))
+    metadata = (pd.read_parquet(metadata_filename,
+                                columns=['sequence', 'charge'])
+                .reset_index().dropna())
+    metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
+    for charge in charges:
+        pairs_filename = metadata_filename.replace('.parquet',
+                                                   f'_pairs_pos_{charge}.npy')
+        if not os.path.isfile(pairs_filename):
+            logger.info('Generate positive pair indexes for charge %d from '
+                        'metadata file %s', charge, metadata_filename)
+            same_row_nums = metadata[metadata['charge'] == charge].groupby(
+                'sequence', as_index=False, sort=False)['index']
+            logger.debug('Save positive pair indexes for charge %d to file %s',
+                         charge, pairs_filename)
+            np.save(pairs_filename, np.asarray(
+                [[np.uint32(p1), np.uint32(p2)]
+                 for p1, p2 in itertools.chain(*(same_row_nums.apply(
+                    functools.partial(itertools.combinations, r=2))))],
+                dtype=np.uint32))
 
 
 def generate_pairs_negative(metadata_filename: str,
