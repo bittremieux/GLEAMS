@@ -246,7 +246,7 @@ def generate_pairs_positive(metadata_filename: str,
                                 columns=['sequence', 'charge'])
                 .reset_index().dropna())
     metadata['sequence'] = metadata['sequence'].str.replace('I', 'L')
-    for charge in charges:
+    for charge in np.arange(charges[0], charges[1] + 1):
         pairs_filename = metadata_filename.replace('.parquet',
                                                    f'_pairs_pos_{charge}.npy')
         if not os.path.isfile(pairs_filename):
@@ -300,7 +300,7 @@ def generate_pairs_negative(metadata_filename: str, charges: Tuple[int],
                                 columns=['sequence', 'charge', 'mz'])
                 .reset_index().dropna()
                 .sort_values(['charge', 'mz']).reset_index(drop=True))
-    for charge in charges:
+    for charge in np.arange(charges[0], charges[1] + 1):
         pairs_filename = metadata_filename.replace('.parquet',
                                                    f'_pairs_neg_{charge}.npy')
         if not os.path.isfile(pairs_filename):
