@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List
+from typing import List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -88,7 +88,8 @@ def train_nn(filename_model: str,
     logger.info('Training completed')
 
 
-def embed(metadata_filename: str, model_filename: str) -> None:
+def embed(metadata_filename: str, model_filename: str,
+          charges: Optional[Tuple[int]] = None) -> None:
     """
     Embed all spectra in the peak directory using the given GLEAMS model.
 
@@ -99,6 +100,9 @@ def embed(metadata_filename: str, model_filename: str) -> None:
         Should be a Parquet file.
     model_filename : str
         The GLEAMS model filename.
+    charges : Optional[Tuple[int]]
+        Optional tuple of minimum and maximum precursor charge (both inclusive)
+        to include, spectra with other precursor charges will be omitted.
     """
     embed_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'embed',
                              'dataset')
@@ -152,11 +156,15 @@ def embed(metadata_filename: str, model_filename: str) -> None:
                         joblib.delayed(feature._peaks_to_features)
                         (dataset, filename, None, enc)
                         for filename in chunk_filenames):
+                if charges is not None and file_scans is not None:
+                    file_scans = file_scans[
+                        (file_scans['charge'] >= charges[0]) &
+                        (file_scans['charge'] <= charges[1])].copy()
                 if file_scans is not None and len(file_scans) > 0:
                     file_scans['dataset'] = dataset
                     file_scans['filename'] = filename
                     scans.append(file_scans)
-                    encodings.extend(file_encodings)
+                    encodings.extend(file_encodings[file_scans.index])
             if len(encodings) > 0:
                 _embed_and_save(
                     encodings, batch_size, emb,
