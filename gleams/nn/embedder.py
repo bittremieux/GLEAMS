@@ -75,7 +75,7 @@ def contrastive_loss(y_true, y_pred):
     -------
     The contrastive loss between the true and predicted class labels.
     """
-    ramp_square = K.minimum(K.square(y_pred), config.margin)
+    ramp_square = K.square(K.minimum(y_pred, config.margin))
     margin_square = K.square(K.maximum(config.margin - y_pred, 0))
     return K.mean(y_true * config.loss_label_certainty * ramp_square +
                   (1 - y_true * config.loss_label_certainty) * margin_square)
