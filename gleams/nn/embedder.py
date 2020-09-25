@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import List
 
 import numpy as np
 import tensorflow as tf
@@ -11,7 +12,6 @@ from tensorflow.keras.layers import concatenate, Conv1D, Dense, Flatten, \
     Lambda, MaxPooling1D, Reshape
 from tensorflow.keras.models import Model
 from tensorflow_addons.optimizers import RectifiedAdam
-from sklearn.metrics import auc, roc_curve
 
 from gleams import config
 from gleams.nn import data_generator
@@ -340,7 +340,7 @@ class Embedder:
 
     def train(self, train_generator: data_generator.PairSequence,
               steps_per_epoch: int = None, num_epochs: int = 1,
-              val_generator: data_generator.PairSequence = None) -> None:
+              validators: List[data_generator.PairSequence] = None) -> None:
         """
         Train the Siamese model.
 
@@ -353,8 +353,8 @@ class Embedder:
              loss at specific intervals.
         num_epochs : int
             The number of epochs for which training occurs.
-        val_generator : data_generator.PairSequence
-            The validation data generator.
+        validators : List[data_generator.PairSequence]
+            The validation data generators.
         """
         if self.siamese_model is None:
             raise ValueError("The Siamese model hasn't been constructed yet")
@@ -364,12 +364,11 @@ class Embedder:
         # CrocHistory has to be added after CSVLogger because it uses the same
         # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
-                     CrocHistory(val_generator, filename_log),
+                     ValidationCallback(validators, filename_log),
                      CSVLogger(filename_log)]
         self.siamese_model.fit(
             train_generator, steps_per_epoch=steps_per_epoch,
-            epochs=num_epochs, callbacks=callbacks,
-            validation_data=val_generator)
+            epochs=num_epochs, callbacks=callbacks)
 
     def embed(self, encodings_generator: data_generator.EncodingsSequence)\
             -> np.ndarray:
@@ -391,30 +390,21 @@ class Embedder:
         return self._get_embedder_model().predict(encodings_generator)
 
 
-class CrocHistory(Callback):
+class ValidationCallback(Callback):
     """
-    Track the AUC CROC on the validation data after each epoch ends.
+    Track the loss on validation sets per charge at the end of each epoch.
     """
 
-    # Alpha = 14 maps x = 0.05 to 0.5.
-    alpha = 14
-
-    def __init__(self, pair_generator, log_filename=None):
+    def __init__(self, pair_generators: List[data_generator.PairSequence],
+                 log_filename: str = None):
         super().__init__()
 
-        self.pair_generator = pair_generator
+        self.pair_generators = pair_generators
         self.log_filename = log_filename
 
     def on_epoch_end(self, epoch, logs=None):
-        if self.pair_generator is not None:
-            y_true, y_pred = [], []
-            for batch_i in range(len(self.pair_generator)):
-                batch_x, batch_y = self.pair_generator[batch_i]
-                y_true.append(batch_y)
-                y_pred.append(self.model.predict(batch_x).reshape(-1))
-            y_true, y_pred = np.hstack(y_true), np.hstack(y_pred)
-            fpr, tpr, _ = roc_curve(y_true, 1 - y_pred / y_pred.max())
-            # Exponential CROC transformation from Swamidass et al. 2010.
-            croc_fpr = ((1 - np.exp(-self.alpha * fpr)) /
-                        (1 - np.exp(-self.alpha)))
-            logs['aucroc'] = auc(croc_fpr, tpr)
+        for charge, pair_generator in zip(
+                np.arange(config.charges[0], config.charges[1] + 1),
+                self.pair_generators):
+            logs[f'val_loss_{charge}'] = self.model.evaluate(pair_generator,
+                                                             verbose=0)

@@ -76,11 +76,15 @@ def train_nn(filename_model: str,
         filename_feat_train, filenames_train_pairs_pos,
         filenames_train_pairs_neg, batch_size, _get_feature_split(),
         config.max_num_pairs_train)
-    val_generator = data_generator.PairSequence(
-        filename_feat_val, filenames_val_pairs_pos, filenames_val_pairs_neg,
-        batch_size, _get_feature_split(), config.max_num_pairs_val, False)
+    validators = [
+        data_generator.PairSequence(
+            filename_feat_val, [filename_val_pairs_pos],
+            [filename_val_pairs_neg], batch_size, _get_feature_split(),
+            config.max_num_pairs_val, False)
+        for filename_val_pairs_pos, filename_val_pairs_neg in zip(
+            filenames_val_pairs_pos, filenames_val_pairs_neg)]
     emb.train(train_generator, steps_per_epoch, config.num_epochs,
-              val_generator)
+              validators)
 
     logger.info('Save the trained GLEAMS neural network')
     emb.save()
