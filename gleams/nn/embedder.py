@@ -20,20 +20,20 @@ from gleams.nn import data_generator
 logger = logging.getLogger('gleams')
 
 
-def euclidean_distance(vects):
+def euclidean_distance(xy: List[tf.Tensor]):
     """
     Euclidean distance between two vectors using Keras.
 
     Parameters
     ----------
-    vects
-        Two vectors between which to compute the Euclidean distance.
+    xy : List[tf.Tensor]
+        List of two vectors between which to compute the Euclidean distance.
 
     Returns
     -------
     The Euclidean distance between the two given vectors.
     """
-    x, y = vects
+    x, y = xy
     sum_square = K.sum(K.square(x - y), axis=1, keepdims=True)
     return K.sqrt(K.maximum(sum_square, K.epsilon()))
 
@@ -55,7 +55,7 @@ def eucl_dist_output_shape(shapes):
     return shape1[0], 1
 
 
-def contrastive_loss(y_true, y_pred):
+def contrastive_loss(y_true: tf.Tensor, y_pred: tf.Tensor):
     """
     Contrastive loss function adapted from Hadsell et al. 2006.
     (http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf)
@@ -66,10 +66,10 @@ def contrastive_loss(y_true, y_pred):
 
     Parameters
     ----------
-    y_true
+    y_true : tf.Tensor
         The true class labels.
-    y_pred
-        The predicted class labels.
+    y_pred : tf.Tensor
+        The predicted embedded Euclidean distances.
 
     Returns
     -------
