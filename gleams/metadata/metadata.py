@@ -308,9 +308,10 @@ def generate_pairs_negative(metadata_filename: str, charges: Tuple[int],
                         'metadata file %s', charge, metadata_filename)
             metadata_charge = metadata[metadata['charge'] == charge]
             # List because Numba can't handle object (string) arrays.
-            sequences = nb.typed.List(
-                metadata['sequence'].str.replace('I', 'L').apply(_remove_mod))
-            fragments = nb.typed.List(metadata['sequence']
+            sequences = nb.typed.List(metadata_charge['sequence']
+                                      .str.replace('I', 'L')
+                                      .apply(_remove_mod))
+            fragments = nb.typed.List(metadata_charge['sequence']
                                       .apply(_get_theoretical_fragment_mzs))
             logger.debug('Save negative pair indexes for charge %d to file %s',
                          charge, pairs_filename)
