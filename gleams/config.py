@@ -69,7 +69,7 @@ margin = 1
 lr = 0.0002
 batch_size = 256
 steps_per_epoch = 40_000  # 256 * 40,000 = 10,240,000 samples per epoch
-num_epochs = 1000
+num_epochs = 100
 max_num_pairs_train = None
 max_num_pairs_val = 512_000
 
