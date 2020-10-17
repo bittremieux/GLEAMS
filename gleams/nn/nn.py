@@ -160,15 +160,17 @@ def embed(metadata_filename: str, model_filename: str,
                         joblib.delayed(feature._peaks_to_features)
                         (dataset, filename, None, enc)
                         for filename in chunk_filenames):
-                if charges is not None and file_scans is not None:
-                    file_scans = file_scans[
-                        (file_scans['charge'] >= charges[0]) &
-                        (file_scans['charge'] <= charges[1])].copy()
-                if file_scans is not None and len(file_scans) > 0:
-                    file_scans['dataset'] = dataset
-                    file_scans['filename'] = filename
-                    scans.append(file_scans)
-                    encodings.extend(file_encodings[file_scans.index])
+                if file_scans is not None:
+                    if charges is not None:
+                        file_scans = file_scans[
+                            (file_scans['charge'] >= charges[0]) &
+                            (file_scans['charge'] <= charges[1])].copy()
+                    if len(file_scans) > 0:
+                        file_scans['dataset'] = dataset
+                        file_scans['filename'] = filename
+                        scans.append(file_scans)
+                        encodings.extend(np.asarray(file_encodings)
+                                         [file_scans.index.values])
             if len(encodings) > 0:
                 _embed_and_save(
                     encodings, batch_size, emb,
