@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 from typing import List, Optional, Tuple
 
@@ -151,7 +152,7 @@ def embed(metadata_filename: str, model_filename: str,
         logger.info('Process dataset %s [%3d/%3d] (%d files)', dataset,
                     dataset_i, dataset_total, len(peak_filenames))
         peak_filenames_chunked = np.array_split(
-            peak_filenames, max(1, len(peak_filenames) // 1000))
+            peak_filenames, math.ceil(len(peak_filenames) / 200))
         scans = []
         for i, chunk_filenames in enumerate(peak_filenames_chunked):
             encodings = []
