@@ -90,10 +90,7 @@ class PairSequence(Sequence):
         """
         Gives the total number of batches.
 
-        This is twice the number of pairs divided by the batch size for the
-        longest pairs list in `self.pairs_pos` (doubling because there are an
-        equal number of pairs in the corresponding entry in `self.pairs_neg`),
-        multiplied by the number of pairs lists in `self.pairs_pos`.
+        The number of batches is determined based on the longest pairs list.
         Batches from the pairs lists that are shorter than the longest pairs
         list will be created using random sampling with repetition, until the
         longest pairs list runs out.
@@ -103,8 +100,8 @@ class PairSequence(Sequence):
         int
             The number of batches.
         """
-        return max([int(math.ceil(len(pairs_pos) / self.batch_size_per_pairs))
-                    for pairs_pos in self.pairs_pos])
+        return math.ceil(max(map(lambda pairs: len(pairs), self.pairs_pos))
+                         / self.batch_size_per_pairs)
 
     def __getitem__(self, idx: int) -> Tuple[List[np.ndarray], np.ndarray]:
         """
