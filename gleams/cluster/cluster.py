@@ -72,11 +72,13 @@ def compute_pairwise_distances(embeddings_filename: str,
                                        .replace('.npz', '.npy'))
     if os.path.isfile(dist_filename):
         return
-    embeddings = np.load(embeddings_filename, mmap_mode='r')
     precursors = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])
                   .sort_values(['charge', 'mz']))
     precursors = precursors[precursors['charge'].isin(
         np.arange(config.charges[0], config.charges[1] + 1))]
+    precursors = precursors.reset_index()
+    embeddings = np.load(embeddings_filename, mmap_mode='r')
+    embeddings = embeddings[precursors['index']]
     min_mz, max_mz = precursors['mz'].min(), precursors['mz'].max()
     mz_splits = np.arange(
         math.floor(min_mz / config.mz_interval) * config.mz_interval,
@@ -117,6 +119,9 @@ def compute_pairwise_distances(embeddings_filename: str,
           np.load(neighbors_filename.format('indices'), mmap_mode='r'),
           np.load(neighbors_filename.format('indptr'), mmap_mode='r'))),
         (num_embeddings, num_embeddings), np.float32, False)
+    # Sort columns and rows by the original metadata/embeddings order.
+    order = np.argsort(precursors['index'])
+    pairwise_dist_matrix = pairwise_dist_matrix[order][:, order]
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     ss.save_npz(dist_filename, pairwise_dist_matrix, False)
     os.remove(neighbors_filename.format('data'))
@@ -253,7 +258,7 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
     index = _load_ann_index(index_filename.format(charge, mz))
     start_i, stop_i = _get_precursor_mz_interval_ids(
         precursor_mzs.values, mz, config.mz_interval, None, 0)
-    interval_ids = precursor_mzs.index[start_i:stop_i]
+    interval_ids = precursor_mzs.index.values[start_i:stop_i]
     for batch_start in range(0, len(interval_ids), config.batch_size_dist):
         batch_stop = batch_start + config.batch_size_dist
         batch_ids = interval_ids[batch_start:batch_stop]
