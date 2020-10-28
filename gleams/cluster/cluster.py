@@ -1,7 +1,7 @@
 import logging
 import math
 import os
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
@@ -250,13 +250,10 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         return
     index = _load_ann_index(index_filename.format(charge, mz))
     start_i, stop_i = _get_precursor_mz_interval_ids(
-        precursor_mzs.values, mz, config.mz_interval,
-        config.precursor_tol_mode, config.precursor_tol_mass)
-    interval_ids = precursor_mzs.index.values[start_i:stop_i]
-    interval_len = len(interval_ids)
-    batch_size = min(interval_len, config.batch_size_dist)
-    for batch_start in range(0, interval_len, batch_size):
-        batch_stop = min(batch_start + batch_size, interval_len)
+        precursor_mzs.values, mz, config.mz_interval, None, 0)
+    interval_ids = precursor_mzs.index[start_i:stop_i]
+    for batch_start in range(0, len(interval_ids), config.batch_size_dist):
+        batch_stop = batch_start + config.batch_size_dist
         batch_ids = interval_ids[batch_start:batch_stop]
         # Find nearest neighbors using ANN index searching.
         nn_dists, nn_idx_ann = index.search(
@@ -264,8 +261,7 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         # Filter the neighbors based on the precursor m/z tolerance.
         nn_idx_mz = _get_neighbors_idx(
             precursor_mzs, precursor_mzs.loc[batch_ids].values)
-        for embedding, idx_ann, idx_mz, dists in zip(
-                batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
+        for idx_ann, idx_mz, dists in zip(nn_idx_ann, nn_idx_mz, nn_dists):
             mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
                                          config.num_neighbors)
             distances.extend(dists[mask].astype(np.float32))
@@ -297,7 +293,8 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
 
 @nb.njit
 def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
-                                   mz_window: float, precursor_tol_mode: str,
+                                   mz_window: float,
+                                   precursor_tol_mode: Optional[str],
                                    precursor_tol_mass: float) -> \
         Tuple[int, int]:
     """
@@ -312,7 +309,7 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
         The lower end of the m/z interval.
     mz_window : float
         The width of the m/z interval.
-    precursor_tol_mode : str
+    precursor_tol_mode : Optional[str]
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
     precursor_tol_mass : float
         The value of the precursor m/z tolerance.
@@ -329,7 +326,8 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
         margin = precursor_tol_mass * start_mz / 10**6
     else:
         margin = 0
-    margin = max(margin, mz_window / 100)
+    if margin > 0:
+        margin = max(margin, mz_window / 100)
     idx = np.searchsorted(
         precursor_mzs, [start_mz - margin, start_mz + mz_window + margin])
     return idx[0], idx[1]
