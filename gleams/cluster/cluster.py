@@ -75,6 +75,8 @@ def compute_pairwise_distances(embeddings_filename: str,
     embeddings = np.load(embeddings_filename, mmap_mode='r')
     precursors = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])
                   .sort_values(['charge', 'mz']))
+    precursors = precursors[precursors['charge'].isin(
+        np.arange(config.charges[0], config.charges[1] + 1))]
     min_mz, max_mz = precursors['mz'].min(), precursors['mz'].max()
     mz_splits = np.arange(
         math.floor(min_mz / config.mz_interval) * config.mz_interval,
@@ -83,7 +85,7 @@ def compute_pairwise_distances(embeddings_filename: str,
     # Create the ANN indexes (if this hasn't been done yet).
     _build_ann_index(index_filename, embeddings, precursors, mz_splits)
     # Calculate pairwise distances.
-    num_embeddings = embeddings.shape[0]
+    num_embeddings = len(precursors)
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
                  config.num_neighbors)
