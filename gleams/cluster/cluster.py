@@ -92,7 +92,7 @@ def compute_pairwise_distances(embeddings_filename: str,
     if (not os.path.isfile(neighbors_filename.format('data')) or
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
-        distances, indices, indptr = [], [], []
+        distances, indices, indptr = [], [], [np.int32(0)]
         with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
                        desc='Distances calculated', unit='index') as pbar:
             for charge, precursors_charge in precursors.groupby('charge'):
