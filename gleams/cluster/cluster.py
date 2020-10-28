@@ -87,8 +87,8 @@ def compute_pairwise_distances(embeddings_filename: str,
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
                  config.num_neighbors)
-    if num_embeddings > np.iinfo(np.uint32).max:
-        raise OverflowError('Too many embedding indexes to fit into uint32')
+    if num_embeddings > np.iinfo(np.int32).max:
+        raise OverflowError('Too many embedding indexes to fit into int32')
     if (not os.path.isfile(neighbors_filename.format('data')) or
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
@@ -104,9 +104,9 @@ def compute_pairwise_distances(embeddings_filename: str,
         np.save(neighbors_filename.format('data'),
                 np.asarray(distances, np.float32))
         np.save(neighbors_filename.format('indices'),
-                np.asarray(indices, np.uint32))
+                np.asarray(indices, np.int32))
         np.save(neighbors_filename.format('indptr'),
-                np.asarray(indptr, np.uint32))
+                np.asarray(indptr, np.int32))
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
@@ -269,8 +269,8 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
             mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
                                          config.num_neighbors)
             distances.extend(dists[mask].astype(np.float32))
-            indices.extend(idx_ann[mask].astype(np.uint32))
-            indptr.append(np.uint32(indptr[-1] + len(mask)))
+            indices.extend(idx_ann[mask].astype(np.int32))
+            indptr.append(np.int32(indptr[-1] + len(mask)))
     index.reset()
 
 
