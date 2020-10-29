@@ -450,7 +450,10 @@ def cluster(distances_filename: str, metadata_filename: str):
     metadata = pd.read_parquet(metadata_filename, columns=['mz'])
     metadata['cluster'] = clusters
     cluster_labels, current_label = np.full_like(clusters, -1), 0
-    for _, clust in metadata[metadata['cluster'] != -1].groupby('cluster'):
+    logger.debug('Post-process %d initial clusters', len(np.unique(clusters)))
+    for _, clust in tqdm.tqdm(
+            metadata[metadata['cluster'] != -1].groupby('cluster'),
+            desc='Clusters post-processed', unit='cluster'):
         # No splitting possible if only 1 item in cluster.
         # This seems to happen sometimes despite that DBSCAN requires a
         # higher `min_samples`.
@@ -463,15 +466,19 @@ def cluster(distances_filename: str, metadata_filename: str):
             # Group items within the cluster based on their precursor m/z.
             # Precursor m/z's within a single group can't exceed the specified
             # precursor m/z tolerance (`distance_threshold` above).
-            mz_cluster_labels = mz_clusterer.fit_predict(pairwise_mz_diff)
+            mz_cluster_assignments = \
+                mz_clusterer.fit_predict(pairwise_mz_diff).reshape(1, -1)
             # Update cluster assignments.
             if mz_clusterer.n_clusters_ == 1:
                 cluster_labels[clust.index] = current_label
                 current_label += 1
             else:
-                mz_clusters = pd.Series(mz_cluster_labels, clust.index)
-                for _, mz_cluster in mz_clusters.groupby(mz_clusters):
-                    cluster_labels[mz_cluster.index] = current_label
+                mz_cluster_labels = (np.arange(mz_clusterer.n_clusters_)
+                                     .reshape(-1, 1))
+                for mz_cluster_label_flags in ne.evaluate(
+                        'mz_cluster_assignments == mz_cluster_labels'):
+                    cluster_labels[clust.index[mz_cluster_label_flags]] = \
+                        current_label
                     current_label += 1
         else:
             cluster_labels[clust.index] = current_label
