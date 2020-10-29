@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
 
 import faiss
+import joblib
 import numba as nb
 import numexpr as ne
 import numpy as np
@@ -439,52 +440,76 @@ def cluster(distances_filename: str, metadata_filename: str):
                 distances_filename)
     dbscan = DBSCAN(config.eps, min_samples=config.min_samples,
                     metric='precomputed', n_jobs=-1)
-    clusters = dbscan.fit_predict(ss.load_npz(distances_filename))
-    logger.debug('Finetune cluster assignments to not exceed %d %s precursor '
-                 'm/z tolerance', config.precursor_tol_mass,
-                 config.precursor_tol_mode)
-    # Agglomerative clustering of the precursor m/z within each DBSCAN cluster.
-    mz_clusterer = AgglomerativeClustering(
-        n_clusters=None, affinity='precomputed', linkage='complete',
-        distance_threshold=config.precursor_tol_mass)
+    cluster_labels = dbscan.fit_predict(ss.load_npz(distances_filename))
+    logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
+                 'precursor m/z tolerance', len(np.unique(cluster_labels)),
+                 config.precursor_tol_mass, config.precursor_tol_mode)
+    # Refine initial clusters to make sure spectra within a cluster don't have
+    # an excessive precursor m/z difference..
     metadata = pd.read_parquet(metadata_filename, columns=['mz'])
-    metadata['cluster'] = clusters
-    cluster_labels, current_label = np.full_like(clusters, -1), 0
-    logger.debug('Post-process %d initial clusters', len(np.unique(clusters)))
-    for _, clust in tqdm.tqdm(
-            metadata[metadata['cluster'] != -1].groupby('cluster'),
-            desc='Clusters post-processed', unit='cluster'):
-        # No splitting possible if only 1 item in cluster.
-        # This seems to happen sometimes despite that DBSCAN requires a
-        # higher `min_samples`.
-        if len(clust) > 1:
-            cluster_mzs = clust['mz'].values.reshape(-1, 1)
-            # Pairwise differences in Dalton.
-            pairwise_mz_diff = pairwise_distances(cluster_mzs, n_jobs=-1)
-            if config.precursor_tol_mode == 'ppm':
-                pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
-            # Group items within the cluster based on their precursor m/z.
-            # Precursor m/z's within a single group can't exceed the specified
-            # precursor m/z tolerance (`distance_threshold` above).
-            mz_cluster_assignments = \
-                mz_clusterer.fit_predict(pairwise_mz_diff).reshape(1, -1)
-            # Update cluster assignments.
-            if mz_clusterer.n_clusters_ == 1:
-                cluster_labels[clust.index] = current_label
-                current_label += 1
-            else:
-                mz_cluster_labels = (np.arange(mz_clusterer.n_clusters_)
-                                     .reshape(-1, 1))
-                for mz_cluster_label_flags in ne.evaluate(
-                        'mz_cluster_assignments == mz_cluster_labels'):
-                    cluster_labels[clust.index[mz_cluster_label_flags]] = \
-                        current_label
-                    current_label += 1
-        else:
-            cluster_labels[clust.index] = current_label
-            current_label += 1
+    metadata['cluster'] = cluster_labels
+    spectra_clusters = joblib.Parallel(n_jobs=-1)(
+        joblib.delayed(_postprocess_cluster)(spectra_cluster)
+        for _, spectra_cluster in tqdm.tqdm(
+            metadata[metadata['cluster'] != -1].groupby('cluster')['mz'],
+            desc='Clusters post-processed', unit='cluster'))
+    # Assign globally unique cluster labels.
+    current_label = 0
+    for spectra_cluster in spectra_clusters:
+        spectra_cluster += current_label
+        current_label += spectra_cluster.nunique()
+    spectra_clusters = pd.concat(spectra_clusters)
+    cluster_labels = -1 * np.ones_like(cluster_labels)
+    cluster_labels[spectra_clusters.index] = spectra_clusters
     # Export the cluster assignments.
     logger.debug('%d embeddings partitioned in %d clusters',
                  len(cluster_labels), len(np.unique(cluster_labels)))
     logger.debug('Save the cluster assignments to file %s', clusters_filename)
     np.save(clusters_filename, cluster_labels)
+
+
+def _postprocess_cluster(spectra_cluster: pd.Series) -> pd.Series:
+    """
+    Agglomerative clustering of the precursor m/z's within each initial
+    cluster to avoid that spectra within a cluster have an excessive precursor
+    m/z difference..
+
+    Parameters
+    ----------
+    spectra_cluster : pd.Series
+        A Series with precursor m/z values of the spectra that are grouped
+        together during the initial clustering.
+
+    Returns
+    -------
+    pd.Series
+        A Series with cluster assignments starting at 0.
+    """
+    # No splitting possible if only 1 item in cluster.
+    # This seems to happen sometimes despite that DBSCAN requires a higher
+    # `min_samples`.
+    if len(spectra_cluster) > 1:
+        cluster_mzs = spectra_cluster.values.reshape(-1, 1)
+        # Pairwise differences in Dalton.
+        pairwise_mz_diff = pairwise_distances(cluster_mzs)
+        if config.precursor_tol_mode == 'ppm':
+            pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
+        # Group items within the cluster based on their precursor m/z.
+        # Precursor m/z's within a single group can't exceed the specified
+        # precursor m/z tolerance (`distance_threshold`).
+        clusterer = AgglomerativeClustering(
+            n_clusters=None, affinity='precomputed', linkage='complete',
+            distance_threshold=config.precursor_tol_mass)
+        cluster_assignments = clusterer.fit_predict(pairwise_mz_diff)
+        # Update cluster assignments.
+        if clusterer.n_clusters_ == 1:
+            return pd.Series(0, spectra_cluster.index)
+        else:
+            cluster_assignments_new = np.zeros_like(cluster_assignments)
+            cluster_assignments = cluster_assignments.reshape(1, -1)
+            labels = np.arange(1, clusterer.n_clusters_).reshape(-1, 1)
+            for label, mask in zip(labels, cluster_assignments == labels):
+                cluster_assignments_new[mask] = label
+            return pd.Series(cluster_assignments_new, spectra_cluster.index)
+    else:
+        return pd.Series(0, spectra_cluster.index)
