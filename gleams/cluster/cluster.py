@@ -112,13 +112,15 @@ def compute_pairwise_distances(embeddings_filename: str,
         np.save(neighbors_filename.format('data'), distances)
         np.save(neighbors_filename.format('indices'), indices)
         np.save(neighbors_filename.format('indptr'), indptr)
+    else:
+        distances = np.load(neighbors_filename.format('data'))
+        indices = np.load(neighbors_filename.format('indices'))
+        indptr = np.load(neighbors_filename.format('indptr'))
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
     pairwise_dist_matrix = ss.csr_matrix(
-        ((np.load(neighbors_filename.format('data'), mmap_mode='r'),
-          np.load(neighbors_filename.format('indices'), mmap_mode='r'),
-          np.load(neighbors_filename.format('indptr'), mmap_mode='r'))),
+        (distances, indices, indptr),
         (len(precursors), len(precursors)), np.float32, False)
     # Sort columns and rows by the original metadata/embeddings order.
     order = np.argsort(precursors['index'])
