@@ -88,16 +88,18 @@ def compute_pairwise_distances(embeddings_filename: str,
     # Create the ANN indexes (if this hasn't been done yet).
     _build_ann_index(index_filename, embeddings, precursors, mz_splits)
     # Calculate pairwise distances.
-    num_embeddings = len(precursors)
     logging.info('Compute pairwise distances between neighboring embeddings '
-                 '(%d embeddings, %d neighbors)', num_embeddings,
+                 '(%d embeddings, %d neighbors)', len(precursors),
                  config.num_neighbors)
-    if num_embeddings > np.iinfo(np.int64).max:
+    if len(precursors) > np.iinfo(np.int64).max:
         raise OverflowError('Too many embedding indexes to fit into int64')
     if (not os.path.isfile(neighbors_filename.format('data')) or
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
-        distances, indices, indptr = [], [], [np.int64(0)]
+        max_num_embeddings = len(precursors) * config.num_neighbors
+        distances = np.zeros(max_num_embeddings, np.float32)
+        indices = np.zeros(max_num_embeddings, np.int64)
+        indptr = np.zeros(len(precursors) + 1, np.int64)
         with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
                        desc='Distances calculated', unit='index') as pbar:
             for charge, precursors_charge in precursors.groupby('charge'):
@@ -106,12 +108,10 @@ def compute_pairwise_distances(embeddings_filename: str,
                         index_filename, embeddings, precursors_charge['mz'],
                         distances, indices, indptr, charge, mz)
                     pbar.update(1)
-        np.save(neighbors_filename.format('data'),
-                np.asarray(distances, np.float32))
-        np.save(neighbors_filename.format('indices'),
-                np.asarray(indices, np.int64))
-        np.save(neighbors_filename.format('indptr'),
-                np.asarray(indptr, np.int64))
+        distances, indices = distances[:indptr[-1]], indices[:indptr[-1]]
+        np.save(neighbors_filename.format('data'), distances)
+        np.save(neighbors_filename.format('indices'), indices)
+        np.save(neighbors_filename.format('indptr'), indptr)
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
@@ -119,7 +119,7 @@ def compute_pairwise_distances(embeddings_filename: str,
         ((np.load(neighbors_filename.format('data'), mmap_mode='r'),
           np.load(neighbors_filename.format('indices'), mmap_mode='r'),
           np.load(neighbors_filename.format('indptr'), mmap_mode='r'))),
-        (num_embeddings, num_embeddings), np.float32, False)
+        (len(precursors), len(precursors)), np.float32, False)
     # Sort columns and rows by the original metadata/embeddings order.
     order = np.argsort(precursors['index'])
     pairwise_dist_matrix = pairwise_dist_matrix[order][:, order]
@@ -225,9 +225,9 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
 
 
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
-                      precursor_mzs: pd.Series, distances: List,
-                      indices: List, indptr: List, charge: int, mz: int)\
-        -> None:
+                      precursor_mzs: pd.Series, distances: np.ndarray,
+                      indices: np.ndarray, indptr: np.ndarray, charge: int,
+                      mz: int) -> None:
     """
     Compute distances to the nearest neighbors for the given precursor m/z
     interval.
@@ -241,12 +241,13 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         The embedding vectors.
     precursor_mzs: pd.Series
         Precursor m/z's corresponding to the embedding vectors.
-    distances : List
+    distances : np.ndarray
         The nearest neighbor distances.
-    indices : List
+        See `scipy.sparse.csr_matrix` (`data`).
+    indices : np.ndarray
         The column indices for the nearest neighbor distances.
         See `scipy.sparse.csr_matrix`.
-    indptr : List
+    indptr : np.ndarray
         The index pointers for the nearest neighbor distances.
         See `scipy.sparse.csr_matrix`.
     charge : int
@@ -269,12 +270,13 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         # Filter the neighbors based on the precursor m/z tolerance.
         nn_idx_mz = _get_neighbors_idx(
             precursor_mzs, precursor_mzs.loc[batch_ids].values)
-        for idx_ann, idx_mz, dists in zip(nn_idx_ann, nn_idx_mz, nn_dists):
+        for i, idx_ann, idx_mz, dists in zip(
+                batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
             mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
                                          config.num_neighbors)
-            distances.extend(dists[mask].astype(np.float32))
-            indices.extend(idx_ann[mask].astype(np.int64))
-            indptr.append(np.int64(indptr[-1] + len(mask)))
+            indptr[i + 1] = indptr[i] + len(mask)
+            distances[indptr[i]:indptr[i + 1]] = dists[mask]
+            indices[indptr[i]:indptr[i + 1]] = idx_ann[mask]
     index.reset()
 
 
