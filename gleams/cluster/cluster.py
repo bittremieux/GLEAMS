@@ -73,36 +73,37 @@ def compute_pairwise_distances(embeddings_filename: str,
                                        .replace('.npz', '.npy'))
     if os.path.isfile(dist_filename):
         return
-    precursors = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])
-                  .sort_values(['charge', 'mz']))
-    precursors = precursors[precursors['charge'].isin(
+    metadata = pd.read_parquet(metadata_filename).sort_values(['charge', 'mz'])
+    metadata = metadata[metadata['charge'].isin(
         np.arange(config.charges[0], config.charges[1] + 1))]
-    precursors = precursors.reset_index()
-    embeddings = np.load(embeddings_filename, mmap_mode='r')
-    embeddings = embeddings[precursors['index']]
-    min_mz, max_mz = precursors['mz'].min(), precursors['mz'].max()
+    metadata = metadata.reset_index()
+    embeddings = np.load(embeddings_filename)
+    embeddings = embeddings[metadata['index']]
+    min_mz, max_mz = metadata['mz'].min(), metadata['mz'].max()
     mz_splits = np.arange(
         math.floor(min_mz / config.mz_interval) * config.mz_interval,
         math.ceil(max_mz / config.mz_interval) * config.mz_interval,
         config.mz_interval)
     # Create the ANN indexes (if this hasn't been done yet).
-    _build_ann_index(index_filename, embeddings, precursors, mz_splits)
+    _build_ann_index(index_filename, embeddings, metadata[['charge', 'mz']],
+                     mz_splits)
     # Calculate pairwise distances.
     logging.info('Compute pairwise distances between neighboring embeddings '
-                 '(%d embeddings, %d neighbors)', len(precursors),
+                 '(%d embeddings, %d neighbors)', len(metadata),
                  config.num_neighbors)
-    if len(precursors) > np.iinfo(np.int64).max:
+    if len(metadata) > np.iinfo(np.int64).max:
         raise OverflowError('Too many embedding indexes to fit into int64')
     if (not os.path.isfile(neighbors_filename.format('data')) or
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
-        max_num_embeddings = len(precursors) * config.num_neighbors
+        max_num_embeddings = len(metadata) * config.num_neighbors
         distances = np.zeros(max_num_embeddings, np.float32)
         indices = np.zeros(max_num_embeddings, np.int64)
-        indptr = np.zeros(len(precursors) + 1, np.int64)
-        with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
+        indptr = np.zeros(len(metadata) + 1, np.int64)
+        with tqdm.tqdm(total=metadata['charge'].nunique() * len(mz_splits),
                        desc='Distances calculated', unit='index') as pbar:
-            for charge, precursors_charge in precursors.groupby('charge'):
+            for charge, precursors_charge in (metadata[['charge', 'mz']]
+                                              .groupby('charge')):
                 for mz in mz_splits:
                     _dist_mz_interval(
                         index_filename, embeddings, precursors_charge['mz'],
@@ -120,16 +121,17 @@ def compute_pairwise_distances(embeddings_filename: str,
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
     pairwise_dist_matrix = ss.csr_matrix(
-        (distances, indices, indptr),
-        (len(precursors), len(precursors)), np.float32, False)
-    # Sort columns and rows by the original metadata/embeddings order.
-    order = np.argsort(precursors['index'])
-    pairwise_dist_matrix = pairwise_dist_matrix[order][:, order]
+        (distances, indices, indptr), (len(metadata), len(metadata)),
+        np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     ss.save_npz(dist_filename, pairwise_dist_matrix, False)
     os.remove(neighbors_filename.format('data'))
     os.remove(neighbors_filename.format('indices'))
     os.remove(neighbors_filename.format('indptr'))
+    # Sort the embeddings and metadata in the same order as the pairwise
+    # distance matrix.
+    np.save(embeddings_filename, embeddings)
+    metadata.drop(columns='index').to_parquet(metadata_filename, index=False)
 
 
 def _build_ann_index(index_filename: str, embeddings: np.ndarray,
