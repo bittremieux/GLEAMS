@@ -45,7 +45,8 @@ _check_ann_config()
 
 
 def compute_pairwise_distances(embeddings_filename: str,
-                               metadata_filename: str) -> None:
+                               metadata_filename: str,
+                               charges: Optional[Tuple[int]] = None) -> None:
     """
     Compute a pairwise distance matrix for the embeddings in the given file.
 
@@ -56,6 +57,9 @@ def compute_pairwise_distances(embeddings_filename: str,
         pairwise distances.
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
+    charges : Optional[Tuple[int]]
+        Optional tuple of minimum and maximum precursor charge (both inclusive)
+        to include, spectra with other precursor charges will be omitted.
     """
     cluster_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'cluster')
     if not os.path.exists(cluster_dir):
@@ -75,8 +79,7 @@ def compute_pairwise_distances(embeddings_filename: str,
         return
     metadata = pd.read_parquet(metadata_filename).sort_values(['charge', 'mz'])
     metadata = metadata[metadata['charge'].isin(
-        np.arange(config.charges[0], config.charges[1] + 1))]
-    metadata = metadata.reset_index()
+        np.arange(charges[0], charges[1] + 1))].reset_index()
     embeddings = np.load(embeddings_filename)
     embeddings = embeddings[metadata['index']]
     min_mz, max_mz = metadata['mz'].min(), metadata['mz'].max()
