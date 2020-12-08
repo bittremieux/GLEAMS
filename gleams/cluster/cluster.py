@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as ss
 import tqdm
-from sklearn.cluster import AgglomerativeClustering, DBSCAN
+from sklearn.cluster import AgglomerativeClustering
 from sklearn.cluster._dbscan_inner import dbscan_inner
 from sklearn.metrics import pairwise_distances
 
@@ -480,21 +480,18 @@ def cluster(distances_filename: str, metadata_filename: str):
             metadata[metadata['cluster'] != -1].groupby('cluster')['mz'],
             desc='Clusters post-processed', unit='cluster'))
     # Assign globally unique cluster labels.
-    current_label = 0
-    for spectra_cluster in spectra_clusters:
-        spectra_cluster += current_label
-        current_label += spectra_cluster.nunique()
-    spectra_clusters = pd.concat(spectra_clusters)
-    cluster_labels = -1 * np.ones_like(cluster_labels)
-    cluster_labels[spectra_clusters.index] = spectra_clusters
+    cluster_labels, current_label = np.full_like(cluster_labels, -1), 0
+    for spectra_cluster, n_clusters in spectra_clusters:
+        cluster_labels[spectra_cluster.index] = spectra_cluster + current_label
+        current_label += n_clusters
     # Export the cluster assignments.
     logger.debug('%d embeddings partitioned in %d clusters',
-                 len(cluster_labels), len(np.unique(cluster_labels)))
+                 len(cluster_labels), current_label + 1)
     logger.debug('Save the cluster assignments to file %s', clusters_filename)
     np.save(clusters_filename, cluster_labels)
 
 
-def _postprocess_cluster(spectra_cluster: pd.Series) -> pd.Series:
+def _postprocess_cluster(spectra_cluster: pd.Series) -> Tuple[pd.Series, int]:
     """
     Agglomerative clustering of the precursor m/z's within each initial
     cluster to avoid that spectra within a cluster have an excessive precursor
@@ -508,8 +505,9 @@ def _postprocess_cluster(spectra_cluster: pd.Series) -> pd.Series:
 
     Returns
     -------
-    pd.Series
-        A Series with cluster assignments starting at 0.
+    Tuple[pd.Series, int]
+        A tuple with the Series with cluster assignments starting at 0 and the
+        number of clusters.
     """
     # No splitting possible if only 1 item in cluster.
     # This seems to happen sometimes despite that DBSCAN requires a higher
@@ -529,13 +527,14 @@ def _postprocess_cluster(spectra_cluster: pd.Series) -> pd.Series:
         cluster_assignments = clusterer.fit_predict(pairwise_mz_diff)
         # Update cluster assignments.
         if clusterer.n_clusters_ == 1:
-            return pd.Series(0, spectra_cluster.index)
+            cluster_assignments_new = 0
         else:
             cluster_assignments_new = np.zeros_like(cluster_assignments)
             cluster_assignments = cluster_assignments.reshape(1, -1)
             labels = np.arange(1, clusterer.n_clusters_).reshape(-1, 1)
             for label, mask in zip(labels, cluster_assignments == labels):
                 cluster_assignments_new[mask] = label
-            return pd.Series(cluster_assignments_new, spectra_cluster.index)
+        return (pd.Series(cluster_assignments_new, spectra_cluster.index),
+                clusterer.n_clusters_)
     else:
-        return pd.Series(0, spectra_cluster.index)
+        return pd.Series(0, spectra_cluster.index), 1
