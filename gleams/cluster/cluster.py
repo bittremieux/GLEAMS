@@ -14,6 +14,7 @@ import pandas as pd
 import scipy.sparse as ss
 import tqdm
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
+from sklearn.cluster._dbscan_inner import dbscan_inner
 from sklearn.metrics import pairwise_distances
 
 from gleams import config
@@ -443,18 +444,34 @@ def cluster(distances_filename: str, metadata_filename: str):
                                            .replace('.npz', '.npy'))
     if os.path.isfile(clusters_filename):
         return
+
     # DBSCAN clustering of the embeddings.
     logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
-    dbscan = DBSCAN(config.eps, min_samples=config.min_samples,
-                    metric='precomputed', n_jobs=-1)
-    cluster_labels = dbscan.fit_predict(ss.load_npz(distances_filename))
+    # Reimplement DBSCAN preprocessing to avoid unnecessary memory consumption.
+    pairwise_dist_matrix = ss.load_npz(distances_filename)
+    # Find the eps-neighborhoods for all points.
+    mask = pairwise_dist_matrix.data <= config.eps
+    indices = pairwise_dist_matrix.indices[mask].astype(np.intp)
+    indptr = np.zeros(len(mask) + 1, dtype=np.int64)
+    np.cumsum(mask, out=indptr[1:])
+    indptr = indptr[pairwise_dist_matrix.indptr]
+    neighborhoods = np.split(indices, indptr[1:-1])
+    # Initially, all samples are noise.
+    cluster_labels = np.full(pairwise_dist_matrix.shape[0], -1, dtype=np.intp)
+    # A list of all core samples found.
+    n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
+    core_samples = n_neighbors >= config.min_samples
+    # Run Scikit-Learn DBSCAN.
+    dbscan_inner(core_samples, np.asarray(neighborhoods, dtype=object),
+                 cluster_labels)
+
+    # Refine initial clusters to make sure spectra within a cluster don't have
+    # an excessive precursor m/z difference.
     logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
                  'precursor m/z tolerance', len(np.unique(cluster_labels)),
                  config.precursor_tol_mass, config.precursor_tol_mode)
-    # Refine initial clusters to make sure spectra within a cluster don't have
-    # an excessive precursor m/z difference..
     metadata = pd.read_parquet(metadata_filename, columns=['mz'])
     metadata['cluster'] = cluster_labels
     spectra_clusters = joblib.Parallel(n_jobs=-1)(
