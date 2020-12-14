@@ -253,7 +253,7 @@ def generate_pairs_positive(metadata_filename: str,
             logger.info('Generate positive pair indexes for charge %d from '
                         'metadata file %s', charge, metadata_filename)
             same_row_nums = metadata[metadata['charge'] == charge].groupby(
-                'sequence', as_index=False, sort=False)['index']
+                'sequence', sort=False)['index']
             logger.debug('Save positive pair indexes for charge %d to file %s',
                          charge, pairs_filename)
             np.save(pairs_filename, np.asarray(
