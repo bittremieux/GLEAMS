@@ -134,8 +134,11 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format('indptr'))
     # Sort the embeddings and metadata in the same order as the pairwise
     # distance matrix.
-    np.save(embeddings_filename, embeddings)
-    metadata.drop(columns='index').to_parquet(metadata_filename, index=False)
+    np.save(os.path.join(cluster_dir, os.path.basename(embeddings_filename)),
+            embeddings)
+    metadata.drop(columns='index').to_parquet(
+        os.path.join(cluster_dir, os.path.basename(metadata_filename)),
+        index=False)
 
 
 def _build_ann_index(index_filename: str, embeddings: np.ndarray,
