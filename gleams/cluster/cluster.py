@@ -39,7 +39,7 @@ def _check_ann_config() -> None:
         logger.warning('Using num_neighbours=1024 (maximum supported value '
                        'for GPU-enabled ANN indexing), %d was supplied',
                        config.num_neighbors)
-        config.num_neighbours = 1024
+        config.num_neighbors = 1024
 
 
 _check_ann_config()
