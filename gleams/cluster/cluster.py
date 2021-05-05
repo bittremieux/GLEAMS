@@ -11,6 +11,7 @@ import pandas as pd
 import scipy.sparse as ss
 import tqdm
 from sklearn.cluster import AgglomerativeClustering
+# noinspection PyProtectedMember
 from sklearn.cluster._dbscan_inner import dbscan_inner
 from sklearn.metrics import pairwise_distances
 
@@ -216,6 +217,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                         faiss.IndexFlatL2(config.embedding_size),
                         config.embedding_size, num_list, faiss.METRIC_L2)
                 index_embeddings = embeddings[index_embeddings_ids]
+                # noinspection PyArgumentList
                 index.train(index_embeddings)
                 # Add the embeddings to the index in batches.
                 logger.debug('Add %d embeddings to the ANN index',
@@ -224,6 +226,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 for batch_start in range(0, num_index_embeddings, batch_size):
                     batch_stop = min(batch_start + batch_size,
                                      num_index_embeddings)
+                    # noinspection PyArgumentList
                     index.add_with_ids(
                         index_embeddings[batch_start:batch_stop],
                         index_embeddings_ids[batch_start:batch_stop])
@@ -277,17 +280,13 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         # noinspection PyArgumentList
         nn_dists, nn_idx_ann = index.search(
             embeddings[batch_ids], config.num_neighbors_ann)
-        # Filter the neighbors based on the precursor m/z tolerance.
-        nn_idx_mz = _get_neighbors_idx(
+        # Filter the neighbors based on the precursor m/z tolerance and assign
+        # distances.
+        _filter_neighbors_mz(
             precursor_mzs.values, precursor_mzs.index.values, batch_start,
-            batch_stop, config.precursor_tol_mass, config.precursor_tol_mode)
-        for i, idx_ann, idx_mz, dists in zip(
-                batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
-            mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
-                                         config.num_neighbors)
-            indptr[i + 1] = indptr[i] + len(mask)
-            distances[indptr[i]:indptr[i + 1]] = dists[mask]
-            indices[indptr[i]:indptr[i + 1]] = idx_ann[mask]
+            batch_stop, config.precursor_tol_mass, config.precursor_tol_mode,
+            nn_dists, nn_idx_ann, config.num_neighbors, distances, indices,
+            indptr)
     index.reset()
 
 
@@ -352,6 +351,56 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
     idx = np.searchsorted(precursor_mzs, [start_mz - margin,
                                           start_mz + mz_window + margin])
     return idx[0], idx[1]
+
+
+@nb.njit
+def _filter_neighbors_mz(
+        precursor_mzs: np.ndarray, idx: np.ndarray, batch_start: int,
+        batch_stop: int, precursor_tol_mass: float, precursor_tol_mode: str,
+        nn_dists: np.ndarray, nn_idx_ann: np.ndarray,
+        num_neighbors: int, distances: np.ndarray, indices: np.ndarray,
+        indptr: np.ndarray) -> None:
+    """
+    Filter ANN neighbor indexes by precursor m/z tolerances and assign
+    pairwise distances.
+
+    Parameters
+    ----------
+    precursor_mzs : np.ndarray
+        Precursor m/z's corresponding to the embeddings.
+    idx : np.ndarray
+        The indexes corresponding to the embeddings.
+    batch_start, batch_stop : int
+        The indexes in the precursor m/z's of the current batch.
+    precursor_tol_mass : float
+        The precursor tolerance mass for embeddings to be considered as
+        neighbors.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    nn_dists : np.ndarray
+        Distances of the nearest neighbors.
+    nn_idx_ann : np.ndarray
+        Indexes of the nearest neighbors.
+    num_neighbors : int
+        The (maximum) number of neighbors to set for each embedding.
+    distances : np.ndarray
+        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
+    indices : np.ndarray
+        The column indices for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    indptr : np.ndarray
+        The index pointers for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    """
+    nn_idx_mz = _get_neighbors_idx(
+        precursor_mzs, idx, batch_start, batch_stop, precursor_tol_mass,
+        precursor_tol_mode)
+    for i, idx_ann, idx_mz, dists in zip(
+            idx[batch_start:batch_stop], nn_idx_ann, nn_idx_mz, nn_dists):
+        mask = _intersect_idx_ann_mz(idx_ann, idx_mz, num_neighbors)
+        indptr[i + 1] = indptr[i] + len(mask)
+        distances[indptr[i]:indptr[i + 1]] = dists[mask]
+        indices[indptr[i]:indptr[i + 1]] = idx_ann[mask]
 
 
 @nb.njit
