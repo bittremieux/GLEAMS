@@ -4,13 +4,15 @@ import os
 from typing import List, Optional, Tuple
 
 import faiss
+import fastcluster
 import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
 import tqdm
-from sklearn.cluster import AgglomerativeClustering
+from scipy.cluster.hierarchy import fcluster
+from scipy.spatial.distance import squareform
 # noinspection PyProtectedMember
 from sklearn.cluster._dbscan_inner import dbscan_inner
 from sklearn.metrics import pairwise_distances
@@ -514,6 +516,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     # Find the eps-neighborhoods for all points.
     mask = pairwise_dist_matrix.data <= config.eps
     indices = pairwise_dist_matrix.indices[mask].astype(np.intp)
+    # noinspection PyTypeChecker
     indptr = np.zeros(len(mask) + 1, dtype=np.int64)
     np.cumsum(mask, out=indptr[1:])
     indptr = indptr[pairwise_dist_matrix.indptr]
@@ -524,77 +527,162 @@ def cluster(distances_filename: str, metadata_filename: str):
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
     core_samples = n_neighbors >= config.min_samples
     # Run Scikit-Learn DBSCAN.
-    dbscan_inner(core_samples, np.asarray(neighborhoods, dtype=object),
-                 cluster_labels)
+    neighborhoods_arr = np.empty(len(neighborhoods), dtype=np.object)
+    neighborhoods_arr[:] = neighborhoods
+    dbscan_inner(core_samples, neighborhoods_arr, cluster_labels)
 
     # Refine initial clusters to make sure spectra within a cluster don't have
     # an excessive precursor m/z difference.
+    precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
+                     .squeeze().values)
+    order = np.argsort(cluster_labels)
+    reverse_order = np.argsort(order)
+    cluster_labels, precursor_mzs = cluster_labels[order], precursor_mzs[order]
     logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
-                 'precursor m/z tolerance', len(np.unique(cluster_labels)),
+                 'precursor m/z tolerance', cluster_labels[-1] + 1,
                  config.precursor_tol_mass, config.precursor_tol_mode)
-    metadata = pd.read_parquet(metadata_filename, columns=['mz'])
-    metadata['cluster'] = cluster_labels
-    spectra_clusters = joblib.Parallel(n_jobs=-1)(
-        joblib.delayed(_postprocess_cluster)(spectra_cluster)
-        for _, spectra_cluster in tqdm.tqdm(
-            metadata[metadata['cluster'] != -1].groupby('cluster')['mz'],
-            desc='Clusters post-processed', unit='cluster'))
-    # Assign globally unique cluster labels.
-    cluster_labels, current_label = np.full_like(cluster_labels, -1), 0
-    for spectra_cluster, n_clusters in spectra_clusters:
-        cluster_labels[spectra_cluster.index] = spectra_cluster + current_label
-        current_label += n_clusters
+
+    group_idx = _get_cluster_group_idx(cluster_labels)
+    if len(group_idx) == 0:     # Only noise samples.
+        cluster_labels = -np.ones_like(precursor_mzs, dtype=np.int64)
+    else:
+        cluster_reassignments = nb.typed.List(joblib.Parallel(n_jobs=-1)(
+            joblib.delayed(_postprocess_cluster)
+            (precursor_mzs[start_i:stop_i], config.precursor_tol_mass,
+             config.precursor_tol_mode, config.min_samples)
+            for start_i, stop_i in group_idx))
+        cluster_labels = _assign_unique_cluster_labels(
+            group_idx, cluster_reassignments, config.min_samples)
+        cluster_labels = cluster_labels[reverse_order]
     # Export the cluster assignments.
-    logger.debug('%d embeddings partitioned in %d clusters',
-                 len(cluster_labels), current_label + 1)
+    logger.debug('%d unique clusters after precursor m/z finetuning',
+                 np.amax(cluster_labels) + 1)
     logger.debug('Save the cluster assignments to file %s', clusters_filename)
     np.save(clusters_filename, cluster_labels)
 
 
-def _postprocess_cluster(spectra_cluster: pd.Series) -> Tuple[pd.Series, int]:
+@nb.njit
+def _get_cluster_group_idx(clusters: np.ndarray) -> nb.typed.List:
     """
-    Agglomerative clustering of the precursor m/z's within each initial
-    cluster to avoid that spectra within a cluster have an excessive precursor
-    m/z difference..
+    Get start and stop indexes for unique cluster labels.
 
     Parameters
     ----------
-    spectra_cluster : pd.Series
-        A Series with precursor m/z values of the spectra that are grouped
-        together during the initial clustering.
+    clusters : np.ndarray
+        The ordered cluster labels (noise points are -1).
 
     Returns
     -------
-    Tuple[pd.Series, int]
-        A tuple with the Series with cluster assignments starting at 0 and the
-        number of clusters.
+    nb.typed.List[Tuple[int, int]]
+        Tuples with the start index (inclusive) and end index (exclusive) of
+        the unique cluster labels.
     """
-    # No splitting possible if only 1 item in cluster.
+    start_i = 0
+    while clusters[start_i] == -1 and start_i < clusters.shape[0]:
+        start_i += 1
+    group_idx, stop_i = nb.typed.List(), start_i
+    while stop_i < clusters.shape[0]:
+        start_i, label = stop_i, clusters[stop_i]
+        while stop_i < clusters.shape[0] and clusters[stop_i] == label:
+            stop_i += 1
+        group_idx.append((start_i, stop_i))
+    return group_idx
+
+
+def _postprocess_cluster(cluster_mzs: np.ndarray, precursor_tol_mass: float,
+                         precursor_tol_mode: str, min_samples: int) \
+        -> Tuple[np.ndarray, int]:
+    """
+    Agglomerative clustering of the precursor m/z's within each initial
+    cluster to avoid that spectra within a cluster have an excessive precursor
+    m/z difference.
+
+    Parameters
+    ----------
+    cluster_mzs : np.ndarray
+        Precursor m/z's of the samples in a single initial cluster.
+    precursor_tol_mass : float
+        Maximum precursor mass tolerance for points to be clustered together.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    min_samples : int
+        The minimum number of samples in a cluster.
+
+    Returns
+    -------
+    Tuple[np.ndarray, int]
+        A tuple with cluster assignments starting at 0 and the number of
+        clusters.
+    """
+    cluster_labels = -np.ones_like(cluster_mzs, np.int64)
+    # No splitting needed if there are too few items in cluster.
     # This seems to happen sometimes despite that DBSCAN requires a higher
     # `min_samples`.
-    if len(spectra_cluster) > 1:
-        cluster_mzs = spectra_cluster.values.reshape(-1, 1)
+    if cluster_labels.shape[0] < min_samples:
+        n_clusters = 0
+    else:
+        cluster_mzs = cluster_mzs.reshape(-1, 1)
         # Pairwise differences in Dalton.
         pairwise_mz_diff = pairwise_distances(cluster_mzs)
-        if config.precursor_tol_mode == 'ppm':
+        if precursor_tol_mode == 'ppm':
             pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
         # Group items within the cluster based on their precursor m/z.
         # Precursor m/z's within a single group can't exceed the specified
         # precursor m/z tolerance (`distance_threshold`).
-        clusterer = AgglomerativeClustering(
-            n_clusters=None, affinity='precomputed', linkage='complete',
-            distance_threshold=config.precursor_tol_mass)
-        cluster_assignments = clusterer.fit_predict(pairwise_mz_diff)
+        # Subtract 1 because fcluster starts with cluster label 1 instead of 0
+        # (like scikit-learn does).
+        cluster_assignments = fcluster(
+            fastcluster.linkage(
+                squareform(pairwise_mz_diff, checks=False), 'complete'),
+            precursor_tol_mass, 'distance') - 1
+        n_clusters = cluster_assignments.max() + 1
         # Update cluster assignments.
-        if clusterer.n_clusters_ == 1:
-            cluster_assignments_new = 0
+        if n_clusters == 1:
+            # Single homogeneous cluster.
+            cluster_labels[:] = 0
+        elif n_clusters == cluster_mzs.shape[0]:
+            # Only singletons.
+            n_clusters = 0
         else:
-            cluster_assignments_new = np.zeros_like(cluster_assignments)
             cluster_assignments = cluster_assignments.reshape(1, -1)
-            labels = np.arange(1, clusterer.n_clusters_).reshape(-1, 1)
-            for label, mask in zip(labels, cluster_assignments == labels):
-                cluster_assignments_new[mask] = label
-        return (pd.Series(cluster_assignments_new, spectra_cluster.index),
-                clusterer.n_clusters_)
-    else:
-        return pd.Series(0, spectra_cluster.index), 1
+            label, labels = 0, np.arange(n_clusters).reshape(-1, 1)
+            # noinspection PyTypeChecker
+            for mask in cluster_assignments == labels:
+                if mask.sum() >= min_samples:
+                    cluster_labels[mask] = label
+                    label += 1
+            n_clusters = label
+    return cluster_labels, n_clusters
+
+
+@nb.njit
+def _assign_unique_cluster_labels(group_idx: nb.typed.List,
+                                  cluster_reassignments: nb.typed.List,
+                                  min_samples: int) -> np.ndarray:
+    """
+    Make sure all cluster labels are unique after potential splitting of
+    clusters to avoid excessive precursor m/z differences.
+
+    Parameters
+    ----------
+    group_idx : nb.typed.List[Tuple[int, int]]
+        Tuples with the start index (inclusive) and end index (exclusive) of
+        the unique cluster labels.
+    cluster_reassignments : nb.typed.List[Tuple[np.ndarray, int]]
+        Tuples with cluster assignments starting at 0 and the number of
+        clusters.
+    min_samples : int
+        The minimum number of samples in a cluster.
+
+    Returns
+    -------
+    np.ndarray
+        An array with globally unique cluster labels.
+    """
+    clusters, current_label = -np.ones(group_idx[-1][1], np.int64), 0
+    for (start_i, stop_i), (cluster_reassignment, n_clusters) in zip(
+            group_idx, cluster_reassignments):
+        if n_clusters > 0 and stop_i - start_i >= min_samples:
+            clusters[start_i:stop_i] = cluster_reassignment + current_label
+            current_label += n_clusters
+    return clusters
