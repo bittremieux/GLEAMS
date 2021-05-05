@@ -101,9 +101,11 @@ def compute_pairwise_distances(embeddings_filename: str,
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
         max_num_embeddings = len(metadata) * config.num_neighbors
+        dtype = (np.int32 if max_num_embeddings < np.iinfo(np.int32).max
+                 else np.int64)
         distances = np.zeros(max_num_embeddings, np.float32)
-        indices = np.zeros(max_num_embeddings, np.int64)
-        indptr = np.zeros(len(metadata) + 1, np.int64)
+        indices = np.zeros(max_num_embeddings, dtype)
+        indptr = np.zeros(len(metadata) + 1, dtype)
         with tqdm.tqdm(total=metadata['charge'].nunique() * len(mz_splits),
                        desc='Distances calculated', unit='index') as pbar:
             for charge, precursors_charge in (metadata[['charge', 'mz']]
