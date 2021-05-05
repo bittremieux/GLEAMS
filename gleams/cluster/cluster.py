@@ -270,20 +270,17 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
     index = _load_ann_index(index_filename.format(charge, mz))
     start_i, stop_i = _get_precursor_mz_interval_ids(
         precursor_mzs.values, mz, config.mz_interval, None, 0)
-    interval_mzs = precursor_mzs.values[start_i:stop_i]
-    interval_ids = precursor_mzs.index.values[start_i:stop_i]
-    for batch_start in range(0, stop_i - start_i, config.batch_size_dist):
-        batch_stop = batch_start + config.batch_size_dist
-        batch_ids = interval_ids[batch_start:batch_stop]
+    for batch_start in range(start_i, stop_i, config.batch_size_dist):
+        batch_stop = min(batch_start + config.batch_size_dist, stop_i)
+        batch_ids = precursor_mzs.index.values[batch_start:batch_stop]
         # Find nearest neighbors using ANN index searching.
         # noinspection PyArgumentList
         nn_dists, nn_idx_ann = index.search(
             embeddings[batch_ids], config.num_neighbors_ann)
         # Filter the neighbors based on the precursor m/z tolerance.
         nn_idx_mz = _get_neighbors_idx(
-            precursor_mzs.values, precursor_mzs.index.values,
-            interval_mzs.values[batch_start:batch_stop],
-            config.precursor_tol_mass, config.precursor_tol_mode)
+            precursor_mzs.values, precursor_mzs.index.values, batch_start,
+            batch_stop, config.precursor_tol_mass, config.precursor_tol_mode)
         for i, idx_ann, idx_mz, dists in zip(
                 batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
             mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
@@ -358,9 +355,9 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
 
 
 @nb.njit
-def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, batch_mzs: np.ndarray,
-                       precursor_tol_mass: float, precursor_tol_mode: str) \
-        -> List[np.ndarray]:
+def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, start_i: int,
+                       stop_i: int, precursor_tol_mass: float,
+                       precursor_tol_mode: str) -> List[np.ndarray]:
     """
     Filter nearest neighbor candidates on precursor m/z.
 
@@ -370,9 +367,9 @@ def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, batch_mzs: np.ndarray,
         The precursor m/z's of the nearest neighbor candidates.
     idx : np.ndarray
         The indexes of the nearest neighbor candidates.
-    batch_mzs : np.ndarray
-        The precursor m/z's for which nearest neighbor candidates will be
-        selected.
+    start_i, stop_i : int
+        Indexes used to slice the values to be considered in the batch
+        (inclusive start_i, exclusive stop_i).
     precursor_tol_mass : float
         The tolerance for vectors to be considered as neighbors.
     precursor_tol_mode : str
@@ -384,6 +381,7 @@ def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, batch_mzs: np.ndarray,
         A list of sorted NumPy arrays with the indexes of the nearest neighbor
         candidates for each item.
     """
+    batch_mzs = mzs[start_i:stop_i]
     if precursor_tol_mode == 'Da':
         min_mz = batch_mzs[0] - precursor_tol_mass
         max_mz = batch_mzs[-1] + precursor_tol_mass
