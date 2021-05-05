@@ -17,7 +17,6 @@ dependencies:
   - libiconv=1.15
   - matplotlib=3.3
   - numba=0.50
-  - numexpr=2.7
   - numpy=1.19
   - pandas=1.0
   - pip=20.1
