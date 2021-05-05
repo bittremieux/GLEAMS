@@ -351,8 +351,8 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
         margin = 0
     if margin > 0:
         margin = max(margin, mz_window / 100)
-    idx = np.searchsorted(
-        precursor_mzs, [start_mz - margin, start_mz + mz_window + margin])
+    idx = np.searchsorted(precursor_mzs, [start_mz - margin,
+                                          start_mz + mz_window + margin])
     return idx[0], idx[1]
 
 
@@ -405,7 +405,7 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
     idx_ann : np.ndarray
         Identifiers from ANN filtering.
     idx_mz : np.ndarray
-        Identifiers from precursor m/z filtering.
+        SORTED identifiers from precursor m/z filtering.
     max_neighbors : int
         The maximum number of best matching neighbors to retain.
 
@@ -414,9 +414,7 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
     np.ndarray
         A mask to select the joint identifiers in the `idx_ann` array.
     """
-    idx_mz, i_mz = np.sort(idx_mz), 0
-    idx_ann_order = np.argsort(idx_ann)
-    idx_ann_intersect = []
+    i_mz, idx_ann_order, idx = 0, np.argsort(idx_ann), []
     for i_order, i_ann in enumerate(idx_ann_order):
         if idx_ann[i_ann] != -1:
             while i_mz < len(idx_mz) and idx_mz[i_mz] < idx_ann[i_ann]:
@@ -424,13 +422,11 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
             if i_mz == len(idx_mz):
                 break
             if idx_ann[i_ann] == idx_mz[i_mz]:
-                idx_ann_intersect.append(i_order)
+                idx.append(idx_ann_order[i_order])
                 i_mz += 1
-    # FIXME: Sorting could be avoided here using np.argpartition, but this is
-    #        currently not supported by Numba.
-    #        https://github.com/numba/numba/issues/2445
-    return (np.sort(idx_ann_order[np.asarray(idx_ann_intersect)])
-            [:max_neighbors])
+    idx = np.asarray(idx)
+    return (idx if max_neighbors >= len(idx)
+            else np.partition(idx, max_neighbors)[:max_neighbors])
 
 
 def cluster(distances_filename: str, metadata_filename: str):
