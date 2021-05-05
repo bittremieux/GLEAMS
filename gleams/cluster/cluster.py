@@ -3,12 +3,9 @@ import math
 import os
 from typing import List, Optional, Tuple
 
-os.environ['NUMEXPR_MAX_THREADS'] = str(os.cpu_count())
-
 import faiss
 import joblib
 import numba as nb
-import numexpr as ne
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
@@ -273,16 +270,20 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
     index = _load_ann_index(index_filename.format(charge, mz))
     start_i, stop_i = _get_precursor_mz_interval_ids(
         precursor_mzs.values, mz, config.mz_interval, None, 0)
+    interval_mzs = precursor_mzs.values[start_i:stop_i]
     interval_ids = precursor_mzs.index.values[start_i:stop_i]
-    for batch_start in range(0, len(interval_ids), config.batch_size_dist):
+    for batch_start in range(0, stop_i - start_i, config.batch_size_dist):
         batch_stop = batch_start + config.batch_size_dist
         batch_ids = interval_ids[batch_start:batch_stop]
         # Find nearest neighbors using ANN index searching.
+        # noinspection PyArgumentList
         nn_dists, nn_idx_ann = index.search(
             embeddings[batch_ids], config.num_neighbors_ann)
         # Filter the neighbors based on the precursor m/z tolerance.
         nn_idx_mz = _get_neighbors_idx(
-            precursor_mzs, precursor_mzs.loc[batch_ids].values)
+            precursor_mzs.values, precursor_mzs.index.values,
+            interval_mzs.values[batch_start:batch_stop],
+            config.precursor_tol_mass, config.precursor_tol_mode)
         for i, idx_ann, idx_mz, dists in zip(
                 batch_ids, nn_idx_ann, nn_idx_mz, nn_dists):
             mask = _intersect_idx_ann_mz(idx_ann, idx_mz,
@@ -356,41 +357,52 @@ def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
     return idx[0], idx[1]
 
 
-def _get_neighbors_idx(mzs: pd.Series, batch_mzs: np.ndarray) -> List:
+@nb.njit
+def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, batch_mzs: np.ndarray,
+                       precursor_tol_mass: float, precursor_tol_mode: str) \
+        -> List[np.ndarray]:
     """
     Filter nearest neighbor candidates on precursor m/z.
 
     Parameters
     ----------
-    mzs : pd.Series
+    mzs : np.ndarray
         The precursor m/z's of the nearest neighbor candidates.
+    idx : np.ndarray
+        The indexes of the nearest neighbor candidates.
     batch_mzs : np.ndarray
         The precursor m/z's for which nearest neighbor candidates will be
         selected.
+    precursor_tol_mass : float
+        The tolerance for vectors to be considered as neighbors.
+    precursor_tol_mode : str
+        The unit of the tolerance ('Da' or 'ppm').
 
     Returns
     -------
-    List
-        A list of NumPy arrays with the indexes of the nearest neighbor
+    List[np.ndarray]
+        A list of sorted NumPy arrays with the indexes of the nearest neighbor
         candidates for each item.
     """
-    precursor_tol_mass = config.precursor_tol_mass
-    if config.precursor_tol_mode == 'Da':
+    if precursor_tol_mode == 'Da':
         min_mz = batch_mzs[0] - precursor_tol_mass
         max_mz = batch_mzs[-1] + precursor_tol_mass
-        mz_filter = 'abs(batch_mzs_arr - match_mzs_arr) < precursor_tol_mass'
-    elif config.precursor_tol_mode == 'ppm':
+    elif precursor_tol_mode == 'ppm':
         min_mz = batch_mzs[0] - batch_mzs[0] * precursor_tol_mass / 10**6
         max_mz = batch_mzs[-1] + batch_mzs[-1] * precursor_tol_mass / 10**6
-        mz_filter = ('abs(batch_mzs_arr - match_mzs_arr)'
-                     '/ match_mzs_arr * 10**6 < precursor_tol_mass')
     else:
         raise ValueError('Unknown precursor tolerance filter')
-    batch_mzs_arr = batch_mzs.reshape((-1, 1))
-    match_idx = np.searchsorted(mzs, [min_mz, max_mz])
-    match_mzs_idx = mzs.index.values[match_idx[0]:match_idx[1]]
-    match_mzs_arr = mzs.values[match_idx[0]:match_idx[1]].reshape((1, -1))
-    return [match_mzs_idx[mask] for mask in ne.evaluate(mz_filter)]
+    batch_mzs = batch_mzs.reshape((-1, 1))
+    match_i = np.searchsorted(mzs, [min_mz, max_mz])
+    match_mzs = mzs[match_i[0]:match_i[1]].reshape((1, -1))
+    if precursor_tol_mode == 'Da':
+        masks = np.abs(batch_mzs - match_mzs) < precursor_tol_mass
+    elif precursor_tol_mode == 'ppm':
+        masks = (np.abs(batch_mzs - match_mzs) / match_mzs * 10**6
+                 < precursor_tol_mass)
+    match_idx = idx[match_i[0]:match_i[1]]
+    # noinspection PyUnboundLocalVariable
+    return [np.sort(match_idx[mask]) for mask in masks]
 
 
 @nb.njit
