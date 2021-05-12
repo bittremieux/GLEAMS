@@ -686,3 +686,120 @@ def _assign_unique_cluster_labels(group_idx: nb.typed.List,
             clusters[start_i:stop_i] = cluster_reassignment + current_label
             current_label += n_clusters
     return clusters
+
+
+def get_cluster_medoids(clusters_filename: str, distances_filename: str):
+    """
+    Get indexes of the cluster representative spectra (medoids).
+
+    Parameters
+    ----------
+    clusters_filename : str
+        Cluster label assignments file.
+    distances_filename : str
+        Precomputed pairwise distance matrix file to use for the DBSCAN
+        clustering.
+
+    Returns
+    -------
+    Optional[np.ndarray]
+        The indexes of the medoid elements for all non-noise clusters, or None
+        if only noise clusters are present.
+    """
+    pairwise_dist_matrix = ss.load_npz(distances_filename)
+    return _get_cluster_medoids(
+        np.load(clusters_filename), pairwise_dist_matrix.indptr,
+        pairwise_dist_matrix.indices, pairwise_dist_matrix.data)
+
+
+@nb.njit(parallel=True)
+def _get_cluster_medoids(clusters: np.ndarray,
+                         pairwise_indptr: np.ndarray,
+                         pairwise_indices: np.ndarray,
+                         pairwise_data: np.ndarray) \
+        -> Optional[np.ndarray]:
+    """
+    Get indexes of the cluster representative spectra (medoids).
+
+    Parameters
+    ----------
+    clusters : np.ndarray
+        Cluster label assignments.
+    pairwise_indptr : np.ndarray
+        The index pointers for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    pairwise_indices : np.ndarray
+        The column indices for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    pairwise_data : np.ndarray
+        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
+
+    Returns
+    -------
+    Optional[np.ndarray]
+        The indexes of the medoid elements for all non-noise clusters, or None
+        if only noise clusters are present.
+    """
+    order, min_i = np.argsort(clusters), 0
+    while min_i < clusters.shape[0] and clusters[order[min_i]] == -1:
+        min_i += 1
+    # Only noise clusters.
+    if min_i == clusters.shape[0]:
+        return None
+    # Find the indexes of the representatives for each unique cluster.
+    cluster_idx, max_i = [], min_i
+    while max_i < order.shape[0]:
+        while (max_i < order.shape[0] and
+               clusters[order[min_i]] == clusters[order[max_i]]):
+            max_i += 1
+        cluster_idx.append((min_i, max_i))
+        min_i = max_i
+    representatives = np.empty(len(cluster_idx), np.uint)
+    for i in nb.prange(len(cluster_idx)):
+        representatives[i] = _get_cluster_medoid_index(
+            order[cluster_idx[i][0]:cluster_idx[i][1]], pairwise_indptr,
+            pairwise_indices, pairwise_data)
+    return representatives
+
+
+@nb.njit(fastmath=True)
+def _get_cluster_medoid_index(cluster_mask: np.ndarray,
+                              pairwise_indptr: np.ndarray,
+                              pairwise_indices: np.ndarray,
+                              pairwise_data: np.ndarray) -> int:
+    """
+    Get the index of the cluster medoid element.
+
+    Parameters
+    ----------
+    cluster_mask : np.ndarray
+        Indexes of the items belonging to the current cluster.
+    pairwise_indptr : np.ndarray
+        The index pointers for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    pairwise_indices : np.ndarray
+        The column indices for the nearest neighbor distances. See
+        `scipy.sparse.csr_matrix`.
+    pairwise_data : np.ndarray
+        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
+
+    Returns
+    -------
+    int
+        The index of the cluster's medoid element.
+    """
+    if len(cluster_mask) <= 2:
+        # Pairwise distances will be identical.
+        return cluster_mask[0]
+    min_i, min_avg = 0, np.inf
+    for row_i in range(cluster_mask.shape[0]):
+        indices = pairwise_indices[pairwise_indptr[cluster_mask[row_i]]:
+                                   pairwise_indptr[cluster_mask[row_i] + 1]]
+        data = pairwise_data[pairwise_indptr[cluster_mask[row_i]]:
+                             pairwise_indptr[cluster_mask[row_i] + 1]]
+        col_i = np.asarray([i for cm in cluster_mask
+                            for i, ind in enumerate(indices) if cm == ind])
+        row_avg = np.mean(data[col_i])
+        if row_avg < min_avg:
+            min_i, min_avg = row_i, row_avg
+    return cluster_mask[min_i]
