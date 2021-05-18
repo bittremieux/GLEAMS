@@ -523,7 +523,10 @@ def cluster(distances_filename: str, metadata_filename: str):
     indptr = indptr[pairwise_dist_matrix.indptr]
     neighborhoods = np.split(indices, indptr[1:-1])
     # Initially, all samples are noise.
-    cluster_labels = np.full(pairwise_dist_matrix.shape[0], -1, dtype=np.intp)
+    # (Memmap for shared memory multiprocessing.)
+    cluster_labels = np.memmap(clusters_filename, np.intp, 'w+',
+                               shape=pairwise_dist_matrix.shape[0])
+    cluster_labels.fill(-1)
     # A list of all core samples found.
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
     core_samples = n_neighbors >= config.min_samples
@@ -538,7 +541,8 @@ def cluster(distances_filename: str, metadata_filename: str):
                      .squeeze().values)
     order = np.argsort(cluster_labels)
     reverse_order = np.argsort(order)
-    cluster_labels, precursor_mzs = cluster_labels[order], precursor_mzs[order]
+    cluster_labels[:] = cluster_labels[order]
+    precursor_mzs = precursor_mzs[order]
     logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
                  'precursor m/z tolerance', cluster_labels[-1] + 1,
                  config.precursor_tol_mass, config.precursor_tol_mode)
@@ -547,20 +551,14 @@ def cluster(distances_filename: str, metadata_filename: str):
     if len(group_idx) == 0:     # Only noise samples.
         cluster_labels.fill(-1)
     else:
-        # Memmap for shared memory multiprocessing.
-        cluster_labels_mmap = np.memmap(
-            clusters_filename, dtype=cluster_labels.dtype, mode='w+',
-            shape=cluster_labels.shape)
-        cluster_labels_mmap[:] = cluster_labels[:]
         n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
             joblib.delayed(_postprocess_cluster)
-            (cluster_labels_mmap[start_i:stop_i],
-             precursor_mzs[start_i:stop_i], config.precursor_tol_mass,
-             config.precursor_tol_mode, config.min_samples)
-            for start_i, stop_i in group_idx))
-        _assign_unique_cluster_labels(cluster_labels_mmap, group_idx,
+            (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
+             config.precursor_tol_mass, config.precursor_tol_mode,
+             config.min_samples) for start_i, stop_i in group_idx))
+        _assign_unique_cluster_labels(cluster_labels, group_idx,
                                       n_clusters, config.min_samples)
-        cluster_labels = cluster_labels_mmap[reverse_order]
+        cluster_labels = cluster_labels[reverse_order]
     # Export the cluster assignments.
     logger.debug('%d unique clusters after precursor m/z finetuning',
                  np.amax(cluster_labels) + 1)
