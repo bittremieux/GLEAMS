@@ -138,7 +138,8 @@ def compute_pairwise_distances(embeddings_filename: str,
     # distance matrix.
     np.save(os.path.join(cluster_dir, os.path.basename(embeddings_filename)),
             embeddings)
-    metadata.drop(columns='index').to_parquet(
+    metadata.drop(columns='index', inplace=True)
+    metadata.to_parquet(
         os.path.join(cluster_dir, os.path.basename(metadata_filename)),
         index=False)
 
