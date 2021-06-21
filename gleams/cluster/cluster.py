@@ -530,8 +530,9 @@ def cluster(distances_filename: str, metadata_filename: str):
     neighborhoods = np.split(indices, indptr[1:-1])
     # Initially, all samples are noise.
     # (Memmap for shared memory multiprocessing.)
-    cluster_labels = np.memmap(clusters_filename, np.intp, 'w+',
-                               shape=pairwise_dist_matrix.shape[0])
+    cluster_labels = np.lib.format.open_memmap(
+        clusters_filename, mode='w+', dtype=np.intp,
+        shape=pairwise_dist_matrix.shape[0])
     cluster_labels.fill(-1)
     # A list of all core samples found.
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
