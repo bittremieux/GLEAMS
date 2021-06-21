@@ -656,14 +656,14 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
             # Only singletons.
             n_clusters = 0
         else:
-            cluster_assignments = cluster_assignments.reshape(1, -1)
-            label, labels = 0, np.arange(n_clusters).reshape(-1, 1)
-            # noinspection PyTypeChecker
-            for mask in cluster_assignments == labels:
-                if mask.sum() >= min_samples:
-                    cluster_labels[mask] = label
-                    label += 1
-            n_clusters = label
+            unique, inverse, counts = np.unique(
+                cluster_assignments, return_inverse=True, return_counts=True)
+            non_noise_clusters = np.where(counts >= min_samples)[0]
+            labels = -np.ones_like(unique)
+            labels[non_noise_clusters] = np.unique(unique[non_noise_clusters],
+                                                   return_inverse=True)[1]
+            cluster_labels[:] = labels[inverse]
+            n_clusters = len(non_noise_clusters)
     return n_clusters
 
 
@@ -691,7 +691,8 @@ def _assign_unique_cluster_labels(cluster_labels: np.ndarray,
     current_label = 0
     for (start_i, stop_i), n_cluster in zip(group_idx, n_clusters):
         if n_cluster > 0 and stop_i - start_i >= min_samples:
-            cluster_labels[start_i:stop_i] += current_label
+            current_labels = cluster_labels[start_i:stop_i]
+            current_labels[current_labels != -1] += current_label
             current_label += n_cluster
         else:
             cluster_labels[start_i:stop_i].fill(-1)
