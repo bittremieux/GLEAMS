@@ -123,6 +123,10 @@ def compute_pairwise_distances(embeddings_filename: str,
         distances = np.load(neighbors_filename.format('data'))
         indices = np.load(neighbors_filename.format('indices'))
         indptr = np.load(neighbors_filename.format('indptr'))
+    embeddings_filename = os.path.join(
+        cluster_dir, os.path.basename(embeddings_filename))
+    metadata_filename = os.path.join(
+        cluster_dir, os.path.basename(metadata_filename))
     # Convert to a sparse pairwise distance matrix. This matrix might not be
     # entirely symmetrical, but that shouldn't matter too much.
     logger.debug('Construct pairwise distance matrix')
@@ -131,17 +135,19 @@ def compute_pairwise_distances(embeddings_filename: str,
         np.float32, False)
     logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
     ss.save_npz(dist_filename, pairwise_dist_matrix, False)
+    # Sort the embeddings and metadata in the same order as the pairwise
+    # distance matrix.
+    logger.debug('Save the reordered embeddings to file %s',
+                 embeddings_filename)
+    np.save(embeddings_filename, embeddings)
+    logger.debug('Save the metadata to file %s', metadata_filename)
+    metadata.drop(columns='index', inplace=True)
+    metadata.to_parquet(metadata_filename, index=False)
+    logger.debug('Clean up temporary pairwise distance files %s',
+                 neighbors_filename)
     os.remove(neighbors_filename.format('data'))
     os.remove(neighbors_filename.format('indices'))
     os.remove(neighbors_filename.format('indptr'))
-    # Sort the embeddings and metadata in the same order as the pairwise
-    # distance matrix.
-    np.save(os.path.join(cluster_dir, os.path.basename(embeddings_filename)),
-            embeddings)
-    metadata.drop(columns='index', inplace=True)
-    metadata.to_parquet(
-        os.path.join(cluster_dir, os.path.basename(metadata_filename)),
-        index=False)
 
 
 def _build_ann_index(index_filename: str, embeddings: np.ndarray,
