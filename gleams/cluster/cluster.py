@@ -521,6 +521,8 @@ def cluster(distances_filename: str, metadata_filename: str):
     # Reimplement DBSCAN preprocessing to avoid unnecessary memory consumption.
     pairwise_dist_matrix = ss.load_npz(distances_filename)
     # Find the eps-neighborhoods for all points.
+    logger.debug('Find the eps-neighborhoods for all points (eps=%.4f)',
+                 config.eps)
     mask = pairwise_dist_matrix.data <= config.eps
     indices = pairwise_dist_matrix.indices[mask].astype(np.intp)
     # noinspection PyTypeChecker
@@ -538,6 +540,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
     core_samples = n_neighbors >= config.min_samples
     # Run Scikit-Learn DBSCAN.
+    logger.debug('Run Scikit-Learn DBSCAN inner.')
     neighborhoods_arr = np.empty(len(neighborhoods), dtype=np.object)
     neighborhoods_arr[:] = neighborhoods
     dbscan_inner(core_samples, neighborhoods_arr, cluster_labels)
@@ -546,6 +549,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     # an excessive precursor m/z difference.
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
                      .squeeze().values)
+    logger.debug('Sort cluster labels in ascending order.')
     order = np.argsort(cluster_labels)
     reverse_order = np.argsort(order)
     cluster_labels[:] = cluster_labels[order]
@@ -553,11 +557,10 @@ def cluster(distances_filename: str, metadata_filename: str):
     logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
                  'precursor m/z tolerance', cluster_labels[-1] + 1,
                  config.precursor_tol_mass, config.precursor_tol_mode)
-
-    group_idx = nb.typed.List(_get_cluster_group_idx(cluster_labels))
-    if len(group_idx) == 0:     # Only noise samples.
+    if cluster_labels[-1] == -1:     # Only noise samples.
         cluster_labels.fill(-1)
     else:
+        group_idx = nb.typed.List(_get_cluster_group_idx(cluster_labels))
         n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
             joblib.delayed(_postprocess_cluster)
             (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
@@ -566,11 +569,8 @@ def cluster(distances_filename: str, metadata_filename: str):
         _assign_unique_cluster_labels(cluster_labels, group_idx,
                                       n_clusters, config.min_samples)
         cluster_labels = cluster_labels[reverse_order]
-    # Export the cluster assignments.
     logger.debug('%d unique clusters after precursor m/z finetuning',
                  np.amax(cluster_labels) + 1)
-    logger.debug('Save the cluster assignments to file %s', clusters_filename)
-    np.save(clusters_filename, cluster_labels)
 
 
 @nb.njit
