@@ -87,6 +87,5 @@ num_neighbors_ann = 1024
 num_probe = 1024
 
 # DBSCAN clustering.
-# TODO: Figure out good hyperparameters.
-eps = 0.5
-min_samples = 5
+eps = 0.02
+min_samples = 2
