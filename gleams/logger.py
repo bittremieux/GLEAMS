@@ -9,9 +9,9 @@ def init():
     # Configure logging.
     logging.captureWarnings(True)
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(logging.DEBUG)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.INFO)
+    handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter(
         '{asctime} {levelname} [{name}/{processName}] {module}.{funcName} : '
         '{message}', style='{'))
@@ -27,4 +27,5 @@ def init():
     logging.getLogger('airflow').setLevel(logging.WARNING)
     logging.getLogger('faiss').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('numba').setLevel(logging.WARNING)
     logging.getLogger('tensorflow').setLevel(logging.WARNING)
