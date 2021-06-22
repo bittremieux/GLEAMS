@@ -522,22 +522,22 @@ def cluster(distances_filename: str, metadata_filename: str):
                 'pairwise distance matrix %s', config.eps, config.min_samples,
                 distances_filename)
     # Reimplement DBSCAN preprocessing to avoid unnecessary memory consumption.
-    pairwise_dist_matrix = ss.load_npz(distances_filename)
+    dist = ss.load_npz(distances_filename)
+    dist_data, dist_indices, dist_indptr = dist.data, dist.indices, dist.indptr
+    num_embeddings = dist.shape[0]
     # Find the eps-neighborhoods for all points.
     logger.debug('Find the eps-neighborhoods for all points (eps=%.4f)',
                  config.eps)
-    mask = pairwise_dist_matrix.data <= config.eps
-    indices = pairwise_dist_matrix.indices[mask].astype(np.intp)
+    mask = dist_data <= config.eps
     # noinspection PyTypeChecker
-    indptr = np.zeros(len(mask) + 1, dtype=np.int64)
-    np.cumsum(mask, out=indptr[1:])
-    indptr = indptr[pairwise_dist_matrix.indptr]
+    indptr = _cumsum(mask)[dist_indptr]
+    indices = dist_indices[mask].astype(np.intp, copy=False)
     neighborhoods = np.split(indices, indptr[1:-1])
     # Initially, all samples are noise.
     # (Memmap for shared memory multiprocessing.)
     cluster_labels = np.lib.format.open_memmap(
         clusters_filename, mode='w+', dtype=np.intp,
-        shape=pairwise_dist_matrix.shape[0])
+        shape=num_embeddings)
     cluster_labels.fill(-1)
     # A list of all core samples found.
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
@@ -575,6 +575,29 @@ def cluster(distances_filename: str, metadata_filename: str):
     cluster_labels.flush()
     logger.debug('%d unique clusters after precursor m/z finetuning',
                  np.amax(cluster_labels) + 1)
+
+
+@nb.njit
+def _cumsum(a: np.ndarray) -> np.ndarray:
+    """
+    Cumulative sum of the elements.
+
+    Try to avoid inadvertent copies in `np.cumsum`.
+
+    Parameters
+    ----------
+    a : np.ndarray
+        Input array
+
+    Returns
+    -------
+    np.ndarray
+        The cumulative sum in an array of size len(a) + 1 (first element is 0).
+    """
+    out = np.zeros(len(a) + 1, dtype=np.int64)
+    for i in range(len(out) - 1):
+        out[i + 1] = out[i] + a[i]
+    return out
 
 
 @nb.njit
