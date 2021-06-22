@@ -1,3 +1,4 @@
+import gc
 import logging
 import math
 import os
@@ -548,6 +549,11 @@ def cluster(distances_filename: str, metadata_filename: str):
     neighborhoods_arr[:] = neighborhoods
     dbscan_inner(core_samples, neighborhoods_arr, cluster_labels)
 
+    # Free up memory by deleting DBSCAN-related data structures.
+    del dist, dist_data, dist_indices, dist_indptr, mask, indptr, indices
+    del neighborhoods, n_neighbors, core_samples, neighborhoods_arr
+    gc.collect()
+
     # Refine initial clusters to make sure spectra within a cluster don't have
     # an excessive precursor m/z difference.
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
@@ -571,7 +577,7 @@ def cluster(distances_filename: str, metadata_filename: str):
              config.min_samples) for start_i, stop_i in group_idx))
         _assign_unique_cluster_labels(cluster_labels, group_idx,
                                       n_clusters, config.min_samples)
-        cluster_labels = cluster_labels[reverse_order]
+        cluster_labels[:] = cluster_labels[reverse_order]
     cluster_labels.flush()
     logger.debug('%d unique clusters after precursor m/z finetuning',
                  np.amax(cluster_labels) + 1)
