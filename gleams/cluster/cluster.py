@@ -557,7 +557,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     # Refine initial clusters to make sure spectra within a cluster don't have
     # an excessive precursor m/z difference.
     precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
-                     .squeeze().values)
+                     .squeeze().values.astype(np.float32))
     logger.debug('Sort cluster labels in ascending order.')
     order = np.argsort(cluster_labels)
     reverse_order = np.argsort(order)
@@ -570,7 +570,7 @@ def cluster(distances_filename: str, metadata_filename: str):
         cluster_labels.fill(-1)
     else:
         group_idx = nb.typed.List(_get_cluster_group_idx(cluster_labels))
-        n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
+        n_clusters = nb.typed.List(joblib.Parallel(n_jobs=1)(
             joblib.delayed(_postprocess_cluster)
             (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
              config.precursor_tol_mass, config.precursor_tol_mode,
@@ -666,19 +666,14 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
     if cluster_labels.shape[0] < min_samples:
         n_clusters = 0
     else:
-        cluster_mzs = cluster_mzs.reshape(-1, 1)
-        # Pairwise differences in Dalton.
-        pairwise_mz_diff = pairwise_distances(cluster_mzs)
-        if precursor_tol_mode == 'ppm':
-            pairwise_mz_diff = pairwise_mz_diff / cluster_mzs * 10**6
         # Group items within the cluster based on their precursor m/z.
         # Precursor m/z's within a single group can't exceed the specified
         # precursor m/z tolerance (`distance_threshold`).
+        pairwise_mz_diff = _condensed_mz_diff(cluster_mzs, precursor_tol_mode)
         # Subtract 1 because fcluster starts with cluster label 1 instead of 0
         # (like scikit-learn does).
         cluster_assignments = fcluster(
-            fastcluster.linkage(
-                squareform(pairwise_mz_diff, checks=False), 'complete'),
+            fastcluster.linkage(pairwise_mz_diff, 'complete'),
             precursor_tol_mass, 'distance') - 1
         n_clusters = cluster_assignments.max() + 1
         # Update cluster assignments.
@@ -698,6 +693,33 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
             cluster_labels[:] = labels[inverse]
             n_clusters = len(non_noise_clusters)
     return n_clusters
+
+
+@nb.njit
+def _condensed_mz_diff(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
+    """
+    Compute the condensed pairwise precursor m/z distance matrix.
+
+    Parameters
+    ----------
+    mzs : np.ndarray
+        The precursor m/z's for which pairwise distances are computed.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+
+    Returns
+    -------
+    np.ndarray
+        The condensed form of the pairwise precursor m/z distance matrix.
+    """
+    diff, d = np.zeros(len(mzs) * (len(mzs) - 1) // 2, np.float32), 0
+    for i in range(mzs.shape[0]):
+        for j in range(i + 1, mzs.shape[0]):
+            diff[d] = np.sqrt((mzs[i] - mzs[j]) ** 2)
+            if precursor_tol_mode == 'ppm':
+                diff[d] = diff[d] / mzs[i] * 10**6
+            d += 1
+    return diff
 
 
 @nb.njit
