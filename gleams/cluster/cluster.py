@@ -538,7 +538,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     # (Memmap for shared memory multiprocessing.)
     cluster_labels = np.lib.format.open_memmap(
         clusters_filename, mode='w+', dtype=np.intp,
-        shape=num_embeddings)
+        shape=(num_embeddings,))
     cluster_labels.fill(-1)
     # A list of all core samples found.
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
