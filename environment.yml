@@ -9,7 +9,6 @@ dependencies:
   - binutils_linux-64=2.34
   - cudatoolkit=10.1
   - faiss-gpu=1.6
-  - fastcluster=1.1.26
   - gcc_linux-64=7.5
   - gxx_linux-64=7.5
   - joblib=0.16
