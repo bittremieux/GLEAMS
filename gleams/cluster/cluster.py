@@ -5,18 +5,16 @@ import os
 from typing import Iterator, List, Optional, Tuple
 
 import faiss
-import fastcluster
 import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
 import scipy.sparse as ss
+import spectrum_utils.utils as suu
 import tqdm
 from scipy.cluster.hierarchy import fcluster
-from scipy.spatial.distance import squareform
 # noinspection PyProtectedMember
 from sklearn.cluster._dbscan_inner import dbscan_inner
-from sklearn.metrics import pairwise_distances
 
 from gleams import config
 
@@ -570,7 +568,7 @@ def cluster(distances_filename: str, metadata_filename: str):
         cluster_labels.fill(-1)
     else:
         group_idx = nb.typed.List(_get_cluster_group_idx(cluster_labels))
-        n_clusters = nb.typed.List(joblib.Parallel(n_jobs=1)(
+        n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
             joblib.delayed(_postprocess_cluster)
             (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
              config.precursor_tol_mass, config.precursor_tol_mode,
@@ -669,11 +667,10 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
         # Group items within the cluster based on their precursor m/z.
         # Precursor m/z's within a single group can't exceed the specified
         # precursor m/z tolerance (`distance_threshold`).
-        pairwise_mz_diff = _condensed_mz_diff(cluster_mzs, precursor_tol_mode)
         # Subtract 1 because fcluster starts with cluster label 1 instead of 0
-        # (like scikit-learn does).
+        # (like Scikit-Learn does).
         cluster_assignments = fcluster(
-            fastcluster.linkage(pairwise_mz_diff, 'complete'),
+            _linkage(cluster_mzs, precursor_tol_mode),
             precursor_tol_mass, 'distance') - 1
         n_clusters = cluster_assignments.max() + 1
         # Update cluster assignments.
@@ -696,9 +693,15 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
 
 
 @nb.njit
-def _condensed_mz_diff(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
+def _linkage(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
     """
-    Compute the condensed pairwise precursor m/z distance matrix.
+    Perform hierarchical clustering of a one-dimensional m/z array.
+
+    Because the data is one-dimensional, no paiwise distance matrix needs to be
+    computed, but rather sorting can be used.
+
+    For information on the linkage output format, see:
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html
 
     Parameters
     ----------
@@ -710,16 +713,26 @@ def _condensed_mz_diff(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        The condensed form of the pairwise precursor m/z distance matrix.
+        The hierarchical clustering encoded as a linkage matrix
     """
-    diff, d = np.zeros(len(mzs) * (len(mzs) - 1) // 2, np.float32), 0
-    for i in range(mzs.shape[0]):
-        for j in range(i + 1, mzs.shape[0]):
-            diff[d] = np.sqrt((mzs[i] - mzs[j]) ** 2)
-            if precursor_tol_mode == 'ppm':
-                diff[d] = diff[d] / mzs[i] * 10**6
-            d += 1
-    return diff
+    linkage = np.zeros((mzs.shape[0] - 1, 4), np.double)
+    # min m/z, max m/z, cluster index, number of cluster elements
+    clusters = [(mzs[i], mzs[i], i, 1) for i in np.argsort(mzs)]
+    for it in range(mzs.shape[0] - 1):
+        min_dist, min_i = np.inf, -1
+        for i in range(len(clusters) - 1):
+            dist = suu.mass_diff(clusters[i + 1][1], clusters[i][0],
+                                 precursor_tol_mode == 'Da')
+            if dist < min_dist:
+                min_dist, min_i = dist, i
+        n_points = clusters[min_i][3] + clusters[min_i + 1][3]
+        linkage[it, :] = [clusters[min_i][2], clusters[min_i + 1][2],
+                          min_dist, n_points]
+        clusters[min_i] = (clusters[min_i][0], clusters[min_i + 1][1],
+                           mzs.shape[0] + it, n_points)
+        del clusters[min_i + 1]
+
+    return linkage
 
 
 @nb.njit
