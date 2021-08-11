@@ -32,6 +32,8 @@ def get_spectra(source: Union[IO, str], scan_nrs: Sequence[int] = None)\
     with mzxml.MzXML(source) as f_in:
         # Iterate over a subset of spectra filtered by scan number.
         if scan_nrs is not None:
+            f_in.build_id_cache()
+
             def spectrum_it():
                 for scan_nr in scan_nrs:
                     yield f_in.get_by_id(str(scan_nr))
