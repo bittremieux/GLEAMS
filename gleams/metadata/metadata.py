@@ -80,7 +80,11 @@ def split_metadata_train_val_test(
     The split is based on dataset, with the ratio of the number of PSMs in each
     split approximating the given ratios.
 
-    If metadata files corresponding to the training/validation/test splits
+    The metadata files for each split will be saved to the same directory as
+    the provided metadata file, with suffix "_train", "_val", and "_test"
+    respectively.
+
+    If all metadata files corresponding to the training/validation/test splits
     already exist the splits will _not_ be recreated.
 
     Parameters
@@ -123,15 +127,18 @@ def split_metadata_train_val_test(
     if num_val > 0:
         selected_val = _select_datasets(datasets, num_val, abs_tol)
         logger.debug('Save validation metadata file to %s', filename_val)
-        metadata.loc[selected_val].reset_index().to_parquet(filename_val)
+        (metadata.loc[selected_val].reset_index()
+         .to_parquet(filename_val, index=False))
         datasets = datasets.drop(selected_val)
     if num_test > 0:
         selected_test = _select_datasets(datasets, num_test, abs_tol)
         logger.debug('Save test metadata file to %s', filename_test)
-        metadata.loc[selected_test].reset_index().to_parquet(filename_test)
+        (metadata.loc[selected_test].reset_index()
+         .to_parquet(filename_test, index=False))
         datasets = datasets.drop(selected_test)
     logger.debug('Save train metadata file to %s', filename_train)
-    metadata.loc[datasets.index].reset_index().to_parquet(filename_train)
+    (metadata.loc[datasets.index].reset_index()
+     .to_parquet(filename_train, index=False))
 
 
 def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
