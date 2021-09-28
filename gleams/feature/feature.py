@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -9,7 +9,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import scipy.sparse as ss
 
-from gleams import config
 from gleams.feature import encoder, spectrum
 from gleams.ms_io import ms_io
 
@@ -17,8 +16,10 @@ from gleams.ms_io import ms_io
 logger = logging.getLogger('gleams')
 
 
-def _peaks_to_features(dataset: str, filename: str,
+def _peaks_to_features(filename: str,
                        metadata: Optional[pd.DataFrame],
+                       fragment_mz_min: float,
+                       fragment_mz_max: float,
                        enc: encoder.SpectrumEncoder)\
         -> Tuple[str, Optional[pd.DataFrame], Optional[List[ss.csr_matrix]]]:
     """
@@ -27,14 +28,16 @@ def _peaks_to_features(dataset: str, filename: str,
 
     Parameters
     ----------
-    dataset : str
-        The peak file's dataset.
     filename : str
         The peak file name.
     metadata : Optional[pd.DataFrame]
         DataFrame containing metadata for the PSMs in the peak file to be
         processed. If None, all spectra in the peak file are converted to
         features.
+    fragment_mz_min : float
+        The minimum m/z for spectrum peaks.
+    fragment_mz_max : float
+        The maximum m/z for spectrum peaks.
     enc : encoder.SpectrumEncoder
         The SpectrumEncoder used to convert spectra to features.
 
@@ -47,20 +50,18 @@ def _peaks_to_features(dataset: str, filename: str,
         If the given file does not exist the final two elements of the tuple
         are None.
     """
-    peak_filename = os.path.join(
-        os.environ['GLEAMS_HOME'], 'data', 'peak', dataset, filename)
-    if not os.path.isfile(peak_filename):
-        logger.warning('Missing peak file %s, no features generated',
-                       peak_filename)
+    if not os.path.isfile(filename):
+        logger.warning('Missing peak file %s, no features generated', filename)
         return filename, None, None
-    logger.debug('Process file %s/%s', dataset, filename)
+    logger.debug('Process file %s', filename)
     file_scans, file_mz, file_charge, file_encodings = [], [], [], []
     if metadata is not None:
         metadata = metadata.reset_index(['dataset', 'filename'], drop=True)
-    for spec in ms_io.get_spectra(peak_filename):
+    for spec in ms_io.get_spectra(filename):
+        # noinspection PyUnresolvedReferences
         if ((metadata is None or np.int64(spec.identifier) in metadata.index)
-                and spectrum.preprocess(spec, config.fragment_mz_min,
-                                        config.fragment_mz_max).is_valid):
+                and spectrum.preprocess(
+                    spec, fragment_mz_min, fragment_mz_max).is_valid):
             file_scans.append(spec.identifier)
             file_mz.append(spec.precursor_mz)
             file_charge.append(spec.precursor_charge)
@@ -71,8 +72,14 @@ def _peaks_to_features(dataset: str, filename: str,
     return filename, scans, file_encodings
 
 
-def convert_peaks_to_features(metadata_filename: str)\
-        -> None:
+def convert_peaks_to_features(metadata_filename: str,
+                              peak_dir: str,
+                              feat_dir: str,
+                              fragment_mz_min: float,
+                              fragment_mz_max: float,
+                              precursor_encoding: Dict[str, Any],
+                              fragment_encoding: Dict[str, Any],
+                              reference_encoding: Dict[str, Any]) -> None:
     """
     Convert all peak files listed in the given metadata file to features.
 
@@ -88,27 +95,32 @@ def convert_peaks_to_features(metadata_filename: str)\
     ----------
     metadata_filename : str
         The metadata file name. Should be a Parquet file.
+    peak_dir : str
+        Directory in which the peak files are stored (in subdirectories per
+        dataset).
+    feat_dir : str
+        Directory where to store the feature files.
+    fragment_mz_min : float
+        The minimum m/z for spectrum peaks.
+    fragment_mz_max : float
+        The maximum m/z for spectrum peaks.
+    precursor_encoding : Dict[str, Any]
+        Settings for the precursor encoder.
+    fragment_encoding : Dict[str, Any]
+        Settings for the fragment encoder.
+    reference_encoding : Dict[str, Any]
+        Settings for the reference spectrum encoder.
     """
     metadata = pd.read_parquet(metadata_filename)
     metadata = metadata.set_index(['dataset', 'filename', 'scan'])
 
     enc = encoder.MultipleEncoder([
-        encoder.PrecursorEncoder(
-            config.num_bits_precursor_mz, config.precursor_mz_min,
-            config.precursor_mz_max, config.num_bits_precursor_mass,
-            config.precursor_mass_min, config.precursor_mass_max,
-            config.precursor_charge_max),
-        encoder.FragmentEncoder(
-            config.fragment_mz_min, config.fragment_mz_max, config.bin_size),
-        encoder.ReferenceSpectraEncoder(
-            config.ref_spectra_filename, config.fragment_mz_min,
-            config.fragment_mz_max, config.fragment_mz_tol,
-            config.num_ref_spectra)
+        encoder.PrecursorEncoder(**precursor_encoding),
+        encoder.FragmentEncoder(**fragment_encoding),
+        encoder.ReferenceSpectraEncoder(**reference_encoding)
     ])
 
     logger.info('Convert peak files for metadata file %s', metadata_filename)
-    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature',
-                            'dataset')
     if not os.path.isdir(feat_dir):
         try:
             os.makedirs(os.path.join(feat_dir))
@@ -118,11 +130,8 @@ def convert_peaks_to_features(metadata_filename: str)\
     for dataset_i, (dataset, metadata_dataset) in enumerate(
             metadata.groupby('dataset', as_index=False, sort=False), 1):
         # Group all encoded spectra per dataset.
-        feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
-        filename_encodings = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.npz')
-        filename_index = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.parquet')
+        filename_encodings = os.path.join(feat_dir, f'{dataset}.npz')
+        filename_index = os.path.join(feat_dir, f'{dataset}.parquet')
         if (not os.path.isfile(filename_encodings) or
                 not os.path.isfile(filename_index)):
             logging.info('Process dataset %s [%3d/%3d]', dataset, dataset_i,
@@ -131,7 +140,8 @@ def convert_peaks_to_features(metadata_filename: str)\
             for filename, file_scans, file_encodings in\
                     joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
                         joblib.delayed(_peaks_to_features)
-                        (dataset, fn, md_fn, enc)
+                        (os.path.join(peak_dir, fn), md_fn,
+                         fragment_mz_min, fragment_mz_max, enc)
                         for fn, md_fn in metadata_dataset.groupby(
                             'filename', as_index=False, sort=False)):
                 if file_scans is not None and len(file_scans) > 0:
