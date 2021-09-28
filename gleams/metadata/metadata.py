@@ -17,8 +17,8 @@ from spectrum_utils import utils as suu
 logger = logging.getLogger('gleams')
 
 
-regex_non_alpha = re.compile('[^A-Za-z]+')
-regex_mod = re.compile('\+\d+.\d+')
+regex_non_alpha = re.compile(r'[^A-Za-z]+')
+regex_mod = re.compile(r'\+\d+.\d+')
 
 
 def convert_massivekb_metadata(massivekb_filename: str,
@@ -162,6 +162,7 @@ def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
             num_selected += dataset_num_psms
         if abs(num_to_select - num_selected) <= num_tol:
             break
+    # noinspection PyTypeChecker
     return datasets_selected
 
 
@@ -344,6 +345,7 @@ def _get_theoretical_fragment_mzs(sequence: str) -> np.ndarray:
     for match in re.finditer(regex_mod, sequence):
         mods[match.start() - mod_pos_offset] = float(match.group(0))
         mod_pos_offset += match.end() - match.start()
+    # noinspection PyProtectedMember
     return np.asarray([fragment.calc_mz for fragment in
                        sus._get_theoretical_peptide_fragments(
                            _remove_mod(sequence), mods)])
