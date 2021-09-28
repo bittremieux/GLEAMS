@@ -124,7 +124,7 @@ def convert_peaks_to_features(metadata_filename: str,
     ])
 
     logger.info('Convert peak files for metadata file %s', metadata_filename)
-    feat_dir = os.path.basename(feat_filename)
+    feat_dir = os.path.dirname(feat_filename)
     if not os.path.isdir(feat_dir):
         try:
             os.makedirs(os.path.join(feat_dir))

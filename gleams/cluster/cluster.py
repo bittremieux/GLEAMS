@@ -16,36 +16,21 @@ from scipy.cluster.hierarchy import fcluster
 # noinspection PyProtectedMember
 from sklearn.cluster._dbscan_inner import dbscan_inner
 
-from gleams import config
-
 
 logger = logging.getLogger('gleams')
 
 
-def _check_ann_config() -> None:
-    """
-    Make sure that the configuration values adhere to the limitations imposed
-    by running Faiss on a GPU.
-    GPU indexes can only handle maximum 1024 probes and neighbors.
-    https://github.com/facebookresearch/faiss/wiki/Faiss-on-the-GPU#limitations
-    """
-    if config.num_probe > 1024:
-        logger.warning('Using num_probe=1024 (maximum supported value for '
-                       'GPU-enabled ANN indexing), %d was supplied',
-                       config.num_probe)
-        config.num_probe = 1024
-    if config.num_neighbors > 1024:
-        logger.warning('Using num_neighbours=1024 (maximum supported value '
-                       'for GPU-enabled ANN indexing), %d was supplied',
-                       config.num_neighbors)
-        config.num_neighbors = 1024
-
-
-_check_ann_config()
-
-
 def compute_pairwise_distances(embeddings_filename: str,
                                metadata_filename: str,
+                               dist_filename: str,
+                               precursor_tol_mass: float,
+                               precursor_tol_mode: str,
+                               mz_interval: float,
+                               num_neighbors: int,
+                               num_neighbors_ann: int,
+                               num_probe: int,
+                               batch_size_add: int,
+                               batch_size_dist: int,
                                charges: Optional[Tuple[int]] = None) -> None:
     """
     Compute a pairwise distance matrix for the embeddings in the given file.
@@ -57,24 +42,39 @@ def compute_pairwise_distances(embeddings_filename: str,
         pairwise distances.
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
+    dist_filename : str
+        File name to export the pairwise distance matrix. Must have the ".npz"
+        extension.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : Optional[str]
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    mz_interval : float
+        Width of the m/z interval for separate ANN indexes.
+    num_neighbors : int
+        The number of neighbors to consider for each embedding.
+    num_neighbors_ann : int
+        The number of neighbors to retrieve from the NN index for each
+        embedding.
+    num_probe: int
+        The number of cells to consider during searching.
+    batch_size_add : int
+        The batch size to add vectors to the NN index.
+    batch_size_dist : int
+        The batch size to query vectors from the NN index.
     charges : Optional[Tuple[int]]
         Optional tuple of minimum and maximum precursor charge (both inclusive)
         to include, spectra with other precursor charges will be omitted.
     """
-    cluster_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'cluster')
+    cluster_dir = os.path.dirname(dist_filename)
     if not os.path.exists(cluster_dir):
         os.mkdir(cluster_dir)
     ann_dir = os.path.join(cluster_dir, 'ann')
     if not os.path.exists(ann_dir):
         os.mkdir(ann_dir)
-    index_filename = os.path.splitext(
-        os.path.basename(embeddings_filename))[0].replace('embed_', 'ann_')
+    index_filename = os.path.splitext(os.path.basename(dist_filename))[0]
     index_filename = os.path.join(ann_dir, index_filename + '_{}_{}.faiss')
-    dist_filename = (os.path.splitext(
-        os.path.basename(embeddings_filename))[0].replace('embed_', 'dist_'))
-    dist_filename = os.path.join(cluster_dir, f'{dist_filename}.npz')
-    neighbors_filename = (dist_filename.replace('dist_', 'neighbors_{}_')
-                                       .replace('.npz', '.npy'))
+    neighbors_filename = dist_filename.replace('.npz', '_{}.npy')
     embeddings_dist_filename = os.path.join(
         cluster_dir, os.path.basename(embeddings_filename))
     metadata_dist_filename = os.path.join(
@@ -100,21 +100,23 @@ def compute_pairwise_distances(embeddings_filename: str,
                  embeddings_dist_filename)
     np.save(embeddings_dist_filename, embeddings)
     min_mz, max_mz = charge_mz['mz'].min(), charge_mz['mz'].max()
-    mz_splits = np.arange(
-        math.floor(min_mz / config.mz_interval) * config.mz_interval,
-        math.ceil(max_mz / config.mz_interval) * config.mz_interval,
-        config.mz_interval)
+    mz_splits = np.arange(math.floor(min_mz / mz_interval) * mz_interval,
+                          math.ceil(max_mz / mz_interval) * mz_interval,
+                          mz_interval)
     # Calculate pairwise distances.
+    num_probe, num_neighbors = _check_ann_config(num_probe, num_neighbors)
     logging.info('Compute pairwise distances between neighboring embeddings '
                  '(%d embeddings, %d neighbors)', num_embeddings,
-                 config.num_neighbors)
+                 num_neighbors)
     if (not os.path.isfile(neighbors_filename.format('data')) or
             not os.path.isfile(neighbors_filename.format('indices')) or
             not os.path.isfile(neighbors_filename.format('indptr'))):
         # Create the ANN indexes (if this hasn't been done yet).
         _build_ann_index(index_filename, embeddings,
-                         charge_mz[['charge', 'mz']], mz_splits)
-        max_num_embeddings = embeddings.shape[0] * config.num_neighbors
+                         charge_mz[['charge', 'mz']], mz_splits, mz_interval,
+                         precursor_tol_mass, precursor_tol_mode,
+                         batch_size_add)
+        max_num_embeddings = embeddings.shape[0] * num_neighbors
         dtype = (np.int32 if max_num_embeddings < np.iinfo(np.int32).max
                  else np.int64)
         distances = np.zeros(max_num_embeddings, np.float32)
@@ -127,7 +129,10 @@ def compute_pairwise_distances(embeddings_filename: str,
                 for mz in mz_splits:
                     _dist_mz_interval(
                         index_filename, embeddings, precursors_charge['mz'],
-                        distances, indices, indptr, charge, mz)
+                        distances, indices, indptr, charge, mz, mz_interval,
+                        num_probe, num_neighbors, num_neighbors_ann,
+                        batch_size_dist, precursor_tol_mass,
+                        precursor_tol_mode)
                     pbar.update(1)
         distances, indices = distances[:indptr[-1]], indices[:indptr[-1]]
         np.save(neighbors_filename.format('data'), distances)
@@ -152,8 +157,29 @@ def compute_pairwise_distances(embeddings_filename: str,
     os.remove(neighbors_filename.format('indptr'))
 
 
+def _check_ann_config(num_probe: int, num_neighbors: int) -> Tuple[int, int]:
+    """
+    Make sure that the configuration values adhere to the limitations imposed
+    by running Faiss on a GPU.
+    GPU indexes can only handle maximum 1024 probes and neighbors.
+    https://github.com/facebookresearch/faiss/wiki/Faiss-on-the-GPU#limitations
+    """
+    if num_probe > 1024:
+        logger.warning('Using num_probe=1024 (maximum supported value for '
+                       'GPU-enabled ANN indexing), %d was supplied', num_probe)
+        num_probe = 1024
+    if num_neighbors > 1024:
+        logger.warning('Using num_neighbours=1024 (maximum supported value '
+                       'for GPU-enabled ANN indexing), %d was supplied',
+                       num_neighbors)
+        num_neighbors = 1024
+    return num_probe, num_neighbors
+
+
 def _build_ann_index(index_filename: str, embeddings: np.ndarray,
-                     precursors: pd.DataFrame, mz_splits: np.ndarray) -> None:
+                     precursors: pd.DataFrame, mz_splits: np.ndarray,
+                     mz_interval: float, precursor_tol_mass: float,
+                     precursor_tol_mode: str, batch_size_add: int) -> None:
     """
     Create ANN indexes for the given embedding vectors.
 
@@ -173,6 +199,14 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
         interval.
     mz_splits: np.ndarray
         M/z splits used to create separate ANN indexes.
+    mz_interval : float
+        Width of the m/z interval for separate ANN indexes.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : Optional[str]
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    batch_size_add : int
+        The batch size to add vectors to the NN index.
     """
     logger.debug('Use %d GPUs for ANN index construction',
                  faiss.get_num_gpus())
@@ -188,8 +222,8 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                 # Create an ANN index using Euclidean distance
                 # for fast NN queries.
                 start_i, stop_i = _get_precursor_mz_interval_ids(
-                    precursors_charge['mz'].values, mz, config.mz_interval,
-                    config.precursor_tol_mode, config.precursor_tol_mass)
+                    precursors_charge['mz'].values, mz, mz_interval,
+                    precursor_tol_mode, precursor_tol_mass)
                 index_embeddings_ids = (precursors_charge.index
                                         .values[start_i:stop_i])
                 num_index_embeddings = len(index_embeddings_ids)
@@ -217,23 +251,24 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                                        ' consider decreasing the ANN size')
                 logger.debug('Build the ANN index for precursor charge %d and '
                              'precursor m/z %d–%d (%d embeddings, %d lists)',
-                             charge, int(mz), int(mz + config.mz_interval),
+                             charge, int(mz), int(mz + mz_interval),
                              num_index_embeddings, num_list)
                 # Create a suitable index and compute cluster centroids.
+                embedding_size = embeddings.shape[0]
                 if num_list <= 0:
                     index = faiss.IndexIDMap(
-                        faiss.IndexFlatL2(config.embedding_size))
+                        faiss.IndexFlatL2(embedding_size))
                 else:
                     index = faiss.IndexIVFFlat(
-                        faiss.IndexFlatL2(config.embedding_size),
-                        config.embedding_size, num_list, faiss.METRIC_L2)
+                        faiss.IndexFlatL2(embedding_size),
+                        embedding_size, num_list, faiss.METRIC_L2)
                 index_embeddings = embeddings[index_embeddings_ids]
                 # noinspection PyArgumentList
                 index.train(index_embeddings)
                 # Add the embeddings to the index in batches.
                 logger.debug('Add %d embeddings to the ANN index',
                              num_index_embeddings)
-                batch_size = min(num_index_embeddings, config.batch_size_add)
+                batch_size = min(num_index_embeddings, batch_size_add)
                 for batch_start in range(0, num_index_embeddings, batch_size):
                     batch_stop = min(batch_start + batch_size,
                                      num_index_embeddings)
@@ -251,7 +286,10 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
 def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
                       precursor_mzs: pd.Series, distances: np.ndarray,
                       indices: np.ndarray, indptr: np.ndarray, charge: int,
-                      mz: int) -> None:
+                      mz: int, mz_interval: float, num_probe: int,
+                      num_neighbors: int, num_neighbors_ann: int,
+                      batch_size: int, precursor_tol_mass: float,
+                      precursor_tol_mode: str) -> None:
     """
     Compute distances to the nearest neighbors for the given precursor m/z
     interval.
@@ -278,30 +316,43 @@ def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
         The active precursor charge to load the ANN index.
     mz : int
         The active precursor m/z split to load the ANN index.
+    num_probe : int
+        The number of cells to consider during searching.
+    num_neighbors : int
+        The number of neighbors to consider for each embedding.
+    num_neighbors_ann : int
+        The number of neighbors to retrieve from the NN index for each
+        embedding.
+    batch_size : int
+        The batch size to query vectors from the NN index.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : Optional[str]
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
     """
     if not os.path.isfile(index_filename.format(charge, mz)):
         return
-    index = _load_ann_index(index_filename.format(charge, mz))
+    index = _load_ann_index(index_filename.format(charge, mz), num_probe)
     start_i, stop_i = _get_precursor_mz_interval_ids(
-        precursor_mzs.values, mz, config.mz_interval, None, 0)
-    for batch_start in range(start_i, stop_i, config.batch_size_dist):
-        batch_stop = min(batch_start + config.batch_size_dist, stop_i)
+        precursor_mzs.values, mz, mz_interval, None, 0)
+    for batch_start in range(start_i, stop_i, batch_size):
+        batch_stop = min(batch_start + batch_size, stop_i)
         batch_ids = precursor_mzs.index.values[batch_start:batch_stop]
         # Find nearest neighbors using ANN index searching.
         # noinspection PyArgumentList
         nn_dists, nn_idx_ann = index.search(
-            embeddings[batch_ids], config.num_neighbors_ann)
+            embeddings[batch_ids], num_neighbors_ann)
         # Filter the neighbors based on the precursor m/z tolerance and assign
         # distances.
         _filter_neighbors_mz(
             precursor_mzs.values, precursor_mzs.index.values, batch_start,
-            batch_stop, config.precursor_tol_mass, config.precursor_tol_mode,
-            nn_dists, nn_idx_ann, config.num_neighbors, distances, indices,
+            batch_stop, precursor_tol_mass, precursor_tol_mode,
+            nn_dists, nn_idx_ann, num_neighbors, distances, indices,
             indptr)
     index.reset()
 
 
-def _load_ann_index(index_filename: str) -> faiss.Index:
+def _load_ann_index(index_filename: str, num_probe: int) -> faiss.Index:
     """
     Load the ANN index from the given file.
 
@@ -309,6 +360,8 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     ----------
     index_filename : str
         The ANN index filename.
+    num_probe : int
+        The number of cells to consider during searching.
 
     Returns
     -------
@@ -318,7 +371,7 @@ def _load_ann_index(index_filename: str) -> faiss.Index:
     index = faiss.read_index(index_filename)
     # IndexIVF has a `nprobe` hyperparameter, flat indexes don't.
     if hasattr(index, 'nprobe'):
-        index.nprobe = min(math.ceil(index.nlist / 2), config.num_probe)
+        index.nprobe = min(math.ceil(index.nlist / 2), num_probe)
     return index
 
 
@@ -499,7 +552,9 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
             else np.partition(idx, max_neighbors)[:max_neighbors])
 
 
-def cluster(distances_filename: str, metadata_filename: str):
+def cluster(distances_filename: str, metadata_filename: str, eps: float,
+            min_samples: int, precursor_tol_mass: float,
+            precursor_tol_mode: str) -> None:
     """
     DBSCAN clustering of the embeddings based on a pairwise distance matrix.
 
@@ -510,6 +565,14 @@ def cluster(distances_filename: str, metadata_filename: str):
         clustering.
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
+    eps : float
+        The eps DBSCAN parameter.
+    min_samples : int
+        The min_samples DBSCAN parameter.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : Optional[str]
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
     """
     clusters_filename = (distances_filename.replace('dist_', 'clusters_')
                                            .replace('.npz', '.npy'))
@@ -518,7 +581,7 @@ def cluster(distances_filename: str, metadata_filename: str):
 
     # DBSCAN clustering of the embeddings.
     logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
-                'pairwise distance matrix %s', config.eps, config.min_samples,
+                'pairwise distance matrix %s', eps, min_samples,
                 distances_filename)
     # Reimplement DBSCAN preprocessing to avoid unnecessary memory consumption.
     dist = ss.load_npz(distances_filename)
@@ -526,21 +589,22 @@ def cluster(distances_filename: str, metadata_filename: str):
     num_embeddings = dist.shape[0]
     # Find the eps-neighborhoods for all points.
     logger.debug('Find the eps-neighborhoods for all points (eps=%.4f)',
-                 config.eps)
-    mask = dist_data <= config.eps
+                 eps)
+    mask = dist_data <= eps
     # noinspection PyTypeChecker
     indptr = _cumsum(mask)[dist_indptr]
     indices = dist_indices[mask].astype(np.intp, copy=False)
     neighborhoods = np.split(indices, indptr[1:-1])
     # Initially, all samples are noise.
     # (Memmap for shared memory multiprocessing.)
+    # noinspection PyUnresolvedReferences
     cluster_labels = np.lib.format.open_memmap(
         clusters_filename, mode='w+', dtype=np.intp,
         shape=(num_embeddings,))
     cluster_labels.fill(-1)
     # A list of all core samples found.
     n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
-    core_samples = n_neighbors >= config.min_samples
+    core_samples = n_neighbors >= min_samples
     # Run Scikit-Learn DBSCAN.
     logger.debug('Run Scikit-Learn DBSCAN inner.')
     neighborhoods_arr = np.empty(len(neighborhoods), dtype=np.object)
@@ -563,7 +627,7 @@ def cluster(distances_filename: str, metadata_filename: str):
     precursor_mzs = precursor_mzs[order]
     logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
                  'precursor m/z tolerance', cluster_labels[-1] + 1,
-                 config.precursor_tol_mass, config.precursor_tol_mode)
+                 precursor_tol_mass, precursor_tol_mode)
     if cluster_labels[-1] == -1:     # Only noise samples.
         cluster_labels.fill(-1)
     else:
@@ -571,10 +635,10 @@ def cluster(distances_filename: str, metadata_filename: str):
         n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
             joblib.delayed(_postprocess_cluster)
             (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
-             config.precursor_tol_mass, config.precursor_tol_mode,
-             config.min_samples) for start_i, stop_i in group_idx))
+             precursor_tol_mass, precursor_tol_mode,
+             min_samples) for start_i, stop_i in group_idx))
         _assign_unique_cluster_labels(cluster_labels, group_idx,
-                                      n_clusters, config.min_samples)
+                                      n_clusters, min_samples)
         cluster_labels[:] = cluster_labels[reverse_order]
     cluster_labels.flush()
     logger.debug('%d unique clusters after precursor m/z finetuning',
