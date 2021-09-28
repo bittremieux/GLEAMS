@@ -1,7 +1,7 @@
 import abc
 import itertools
 import logging
-from typing import List
+from typing import Any, Dict, List
 
 import numba as nb
 import numpy as np
@@ -170,7 +170,7 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
     Represents a spectrum as similarity to a set of reference spectra.
     """
 
-    def __init__(self, filename: str, min_mz: float, max_mz: float,
+    def __init__(self, filename: str, preprocessing: Dict[str, Any],
                  fragment_mz_tol: float, num_ref_spectra: int):
         """
         Instantiate a ReferenceSpectraEncoder by vectorizing the reference
@@ -180,10 +180,8 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
         ----------
         filename : str
             The file from which to read the reference spectra.
-        min_mz : float
-            The minimum m/z to include in the vector.
-        max_mz : float
-            The maximum m/z to include in the vector.
+        preprocessing : Dict[str, Any]
+            Spectrum preprocessing settings.
         fragment_mz_tol : float
             The fragment m/z tolerance used to compute the spectrum dot
             product to the reference spectra.
@@ -205,7 +203,8 @@ class ReferenceSpectraEncoder(SpectrumEncoder):
         np.random.shuffle(ref_spectra)
         self.ref_spectra = []
         for spec in ref_spectra:
-            if spectrum.preprocess(spec, min_mz, max_mz).is_valid:
+            # noinspection PyUnresolvedReferences
+            if spectrum.preprocess(spec, **preprocessing).is_valid:
                 self.ref_spectra.append(spec)
                 if len(self.ref_spectra) == num_ref_spectra:
                     break
