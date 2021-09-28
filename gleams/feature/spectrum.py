@@ -1,13 +1,12 @@
 import functools
 import math
+from typing import Optional
 
 import numba as nb
 import numpy as np
 import scipy.sparse as ss
 import scipy.sparse.linalg
 from spectrum_utils.spectrum import MsmsSpectrum
-
-from gleams import config
 
 
 @nb.njit
@@ -39,10 +38,12 @@ def _check_spectrum_valid(spectrum_mz: np.ndarray, min_peaks: int,
 def _norm_intensity(spectrum_intensity: np.ndarray) -> np.ndarray:
     """
     Normalize spectrum peak intensities.
+
     Parameters
     ----------
     spectrum_intensity : np.ndarray
         The spectrum peak intensities to be normalized.
+
     Returns
     -------
     np.ndarray
@@ -51,12 +52,48 @@ def _norm_intensity(spectrum_intensity: np.ndarray) -> np.ndarray:
     return spectrum_intensity / np.linalg.norm(spectrum_intensity)
 
 
-def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:
+def preprocess(spectrum: MsmsSpectrum,
+               mz_min: float,
+               mz_max: float,
+               min_peaks: int,
+               min_mz_range: float,
+               remove_precursor_tolerance: Optional[float],
+               min_intensity: float,
+               max_peaks_used: int,
+               scaling: Optional[str]) -> MsmsSpectrum:
+    """
+    Preprocess the given spectrum.
+
+    Parameters
+    ----------
+    spectrum:  MsmsSpectrum
+        The spectrum to be preprocessed.
+    mz_min : float
+        The minimum m/z value to be included.
+    mz_max : float
+        The maximum m/z value to be included.
+    min_peaks : int
+        Minimum number of peaks the spectrum needs to have to be considered
+        valid.
+    min_mz_range : float
+        Minimum m/z range to be covered for the spectrum to be considered
+        valid.
+    remove_precursor_tolerance : Optional[float]
+        Remove peaks within the given m/z of the precursor peak.
+    min_intensity : float
+        Discard peaks below the given minimum intensity.
+    max_peaks_used : int
+        Retain only the given number of most intense peaks.
+    scaling : Optional[str]
+        Perform optional intensity scaling.
+
+    Returns
+    -------
+    np.ndarray
+        The normalized peak intensities.
+    """
     if spectrum.is_processed:
         return spectrum
-
-    min_peaks = config.min_peaks
-    min_mz_range = config.min_mz_range
 
     spectrum = spectrum.set_mz_range(mz_min, mz_max)
     if not _check_spectrum_valid(spectrum.mz, min_peaks, min_mz_range):
@@ -64,27 +101,25 @@ def preprocess(spectrum: MsmsSpectrum, mz_min, mz_max) -> MsmsSpectrum:
         spectrum.is_processed = True
         return spectrum
 
-    if config.remove_precursor_tolerance is not None:
+    if remove_precursor_tolerance is not None:
         spectrum = spectrum.remove_precursor_peak(
-            config.remove_precursor_tolerance, 'Da')
+            remove_precursor_tolerance, 'Da')
         if not _check_spectrum_valid(spectrum.mz, min_peaks, min_mz_range):
             spectrum.is_valid = False
             spectrum.is_processed = True
             return spectrum
 
-    spectrum = spectrum.filter_intensity(config.min_intensity,
-                                         config.max_peaks_used)
+    spectrum = spectrum.filter_intensity(min_intensity, max_peaks_used)
     if not _check_spectrum_valid(spectrum.mz, min_peaks, min_mz_range):
         spectrum.is_valid = False
         spectrum.is_processed = True
         return spectrum
 
-    scaling = config.scaling
+    scaling = scaling
     if scaling == 'sqrt':
         scaling = 'root'
     if scaling is not None:
-        spectrum = spectrum.scale_intensity(scaling,
-                                            max_rank=config.max_peaks_used)
+        spectrum = spectrum.scale_intensity(scaling, max_rank=max_peaks_used)
 
     spectrum.intensity = _norm_intensity(spectrum.intensity)
 
