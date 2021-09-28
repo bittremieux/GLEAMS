@@ -249,7 +249,8 @@ def generate_pairs_positive(metadata_filename: str,
     sequence in the metadata, split by precursor charge. Identity pairs are
     included.
     Pairs of row numbers in the metadata file for each positive pair are stored
-    in Parquet file `{metadata_filename}_pairs_pos_{charge}.parquet`.
+    in Parquet file `{metadata_filename}_pairs_pos_{charge}.parquet` in the
+    same directory as the provided metadata file.
     If these files already exists they will _not_ be recreated.
 
     Parameters
@@ -293,7 +294,8 @@ def generate_pairs_negative(metadata_filename: str, charges: Tuple[int],
     sequence, a precursor m/z difference smaller than the given m/z tolerance,
     and mostly non-overlapping b and y ions, split by precursor charge.
     Pairs of row numbers in the metadata file for each negative pair are stored
-    in Parquet file `{metadata_filename}_pairs_neg_{charge}.parquet`.
+    in Parquet file `{metadata_filename}_pairs_neg_{charge}.parquet` in the
+    same directory as the provided metadata file.
     If these files already exists they will _not_ be recreated.
 
     Parameters
