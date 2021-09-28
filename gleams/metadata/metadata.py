@@ -205,13 +205,12 @@ def download_massive_file(massive_filename: str, dir_name: str) -> None:
                            peak_filename, proc.returncode, proc.stderr)
 
 
-def download_massivekb_peaks(massivekb_filename: str, dir_name: str,
-                             dataset_subdir: bool) -> None:
+def download_massivekb_peaks(massivekb_filename: str, dir_name: str) -> None:
     """
     Download all peak files listed in the given MassIVE-KB metadata file.
 
-    Peak files will be stored in the given directory, optionally creating
-    individual subdirectories per dataset.
+    Peak files will be stored in subdirectories the given directory per
+    dataset.
     Existing peak files will _not_ be downloaded again.
 
     Parameters
@@ -220,18 +219,13 @@ def download_massivekb_peaks(massivekb_filename: str, dir_name: str,
         The metadata file name.
     dir_name : str
         The local directory where the peak files will be stored.
-    dataset_subdir : bool
-        Create a separate subdirectory for each dataset or not.
     """
     filenames = (pd.read_csv(massivekb_filename, sep='\t',
                              usecols=['filename'])
                  .drop_duplicates('filename'))
-    if not dataset_subdir:
-        filenames['dir_name'] = dir_name
-    else:
-        datasets = filenames.str.split('/', 1).str[0]
-        filenames['dir_name'] = datasets.apply(
-            lambda dataset: os.path.join(dir_name, dataset))
+    datasets = filenames.str.split('/', 1).str[0]
+    filenames['dir_name'] = datasets.apply(
+        lambda dataset: os.path.join(dir_name, dataset))
     logger.info('Download peak files from MassIVE')
     joblib.Parallel(n_jobs=-1)(
         joblib.delayed(download_massive_file)(filename, dir_name)
