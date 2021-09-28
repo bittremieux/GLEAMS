@@ -73,8 +73,8 @@ def _peaks_to_features(filename: str,
 
 
 def convert_peaks_to_features(metadata_filename: str,
+                              feat_filename: str,
                               peak_dir: str,
-                              feat_dir: str,
                               fragment_mz_min: float,
                               fragment_mz_max: float,
                               precursor_encoding: Dict[str, Any],
@@ -83,23 +83,26 @@ def convert_peaks_to_features(metadata_filename: str,
     """
     Convert all peak files listed in the given metadata file to features.
 
-    Encoded spectra will be stored as NumPy binary files for each dataset in
-    the metadata. A corresponding index file for each dataset containing the
-    peak filenames, spectrum identifiers, and indexes in the NumPy binary file
-    will be stored as Parquet files.
+    First, encoded spectra will be stored as NumPy binary files for each
+    dataset. A corresponding index file for each dataset containing the peak
+    filenames, spectrum identifiers, and indexes in the NumPy binary file will
+    be stored as Parquet files.
+    Second, all encoded spectra and index files will be concatenated into a
+    single output file.
 
-    If both the NumPy binary file and the Parquet index file already exist, the
-    corresponding dataset will _not_ be processed again.
+    If both a NumPy binary file and a Parquet index file for a dataset already
+    exist, the corresponding dataset will _not_ be processed again.
 
     Parameters
     ----------
     metadata_filename : str
         The metadata file name. Should be a Parquet file.
+    feat_filename : str
+        The feature file name to store the encoded spectra. Should have a
+        ".npz" extension.
     peak_dir : str
         Directory in which the peak files are stored (in subdirectories per
         dataset).
-    feat_dir : str
-        Directory where to store the feature files.
     fragment_mz_min : float
         The minimum m/z for spectrum peaks.
     fragment_mz_max : float
@@ -121,6 +124,7 @@ def convert_peaks_to_features(metadata_filename: str,
     ])
 
     logger.info('Convert peak files for metadata file %s', metadata_filename)
+    feat_dir = os.path.basename(feat_filename)
     if not os.path.isdir(feat_dir):
         try:
             os.makedirs(os.path.join(feat_dir))
@@ -153,9 +157,12 @@ def convert_peaks_to_features(metadata_filename: str,
                 ss.save_npz(filename_encodings, ss.vstack(encodings, 'csr'))
                 metadata.loc[metadata_index].reset_index().to_parquet(
                     filename_index, index=False)
+    # Combine all individual dataset features.
+    _combine_features(feat_filename, feat_dir, metadata['dataset'].unique())
 
 
-def combine_features(metadata_filename: str) -> None:
+def _combine_features(filename: str, feat_dir: str, datasets: np.ndarray) \
+        -> None:
     """
     Combine feature files for multiple datasets into a single feature file.
 
@@ -163,27 +170,26 @@ def combine_features(metadata_filename: str) -> None:
 
     Parameters
     ----------
-    metadata_filename : str
-        Features for all datasets included in the metadata will be combined.
-        Should be a Parquet file.
+    filename : str
+        The feature file name to store the encoded spectra. Should have a
+        ".npz" extension.
+    feat_dir : str
+        Directory from which to read the encoding files for individual
+        datasets.
+    datasets : np.ndarray
+        The datasets for which feature files will be combined.
     """
-    feat_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'feature')
-    feat_filename = os.path.join(feat_dir, os.path.splitext(
-        os.path.basename(metadata_filename))[0].replace('metadata', 'feature'))
-    if (os.path.isfile(f'{feat_filename}.npz') and
-            os.path.isfile(f'{feat_filename}.parquet')):
+    filename_encodings = filename
+    filename_index = f'{os.path.splitext(filename)[0]}.parquet'
+    if os.path.isfile(filename_encodings) and os.path.isfile(filename_index):
         return
-    datasets = pd.read_parquet(
-        metadata_filename, columns=['dataset'])['dataset'].unique()
-    logger.info('Combine features for metadata file %s containing %d datasets',
-                metadata_filename, len(datasets))
+    logger.info('Combine features for %d datasets into file %s',
+                len(datasets), filename_encodings)
     encodings, indexes = [], []
     for i, dataset in enumerate(datasets, 1):
         logger.debug('Append dataset %s [%3d/%3d]', dataset, i, len(datasets))
-        dataset_encodings_filename = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.npz')
-        dataset_index_filename = os.path.join(
-            feat_dir, 'dataset', f'{dataset}.parquet')
+        dataset_encodings_filename = os.path.join(feat_dir, f'{dataset}.npz')
+        dataset_index_filename = os.path.join(feat_dir, f'{dataset}.parquet')
         if (not os.path.isfile(dataset_encodings_filename) or
                 not os.path.isfile(dataset_index_filename)):
             logger.warning('Missing features for dataset %s, skipping...',
@@ -191,5 +197,5 @@ def combine_features(metadata_filename: str) -> None:
         else:
             encodings.append(ss.load_npz(dataset_encodings_filename))
             indexes.append(pq.read_table(dataset_index_filename))
-    ss.save_npz(f'{feat_filename}.npz', ss.vstack(encodings, 'csr'))
-    pq.write_table(pa.concat_tables(indexes), f'{feat_filename}.parquet')
+    ss.save_npz(filename_encodings, ss.vstack(encodings, 'csr'))
+    pq.write_table(pa.concat_tables(indexes), filename_index)
