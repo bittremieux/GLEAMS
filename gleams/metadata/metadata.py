@@ -173,60 +173,70 @@ def _select_datasets(datasets: pd.Series, num_to_select: int, num_tol: int)\
     return datasets_selected
 
 
-def download_massive_file(massive_filename: str) -> None:
+def download_massive_file(massive_filename: str, dir_name: str) -> None:
     """
     Download the given file from MassIVE.
 
     The file is downloaded using a `wget` subprocess.
-    The file will be stored in the `data/peak/{dataset}/{filename}` directory.
     If the file already exists it will _not_ be downloaded again.
 
     Parameters
     ----------
     massive_filename : str
         The local MassIVE file link.
+    dir_name : str
+        The local directory where the file will be stored.
     """
-    dataset = massive_filename.split('/', 1)[0]
-    dataset_dir = os.path.join(os.environ['GLEAMS_HOME'], 'data', 'peak',
-                               dataset)
-    peak_filename = massive_filename.rsplit('/', 1)[-1]
+    peak_filename = os.path.join(dir_name, massive_filename.rsplit('/', 1)[-1])
     if not os.path.isfile(peak_filename):
-        if not os.path.isdir(dataset_dir):
+        if not os.path.isdir(dir_name):
             try:
-                os.makedirs(dataset_dir)
+                os.makedirs(dir_name)
             except OSError:
                 pass
-        logger.debug('Download file %s/%s', dataset, peak_filename)
+        logger.debug('Download file %s', massive_filename)
         url = f'ftp://massive.ucsd.edu/{massive_filename}'
         proc = subprocess.run(
             ['wget', '--no-verbose', '--timestamping', '--retry-connrefused',
-             f'--directory-prefix={dataset_dir}', '--passive-ftp', url],
+             f'--directory-prefix={dir_name}', '--passive-ftp', url],
             capture_output=True, text=True)
         if proc.returncode != 0:
-            logger.warning('Could not download file %s/%s: wget error %d: %s',
-                           dataset, peak_filename, proc.returncode,
-                           proc.stderr)
+            logger.warning('Could not download file %s: wget error %d: %s',
+                           peak_filename, proc.returncode, proc.stderr)
 
 
-def download_massivekb_peaks(massivekb_filename: str) -> None:
+def download_massivekb_peaks(massivekb_filename: str, dir_name: str,
+                             dataset_subdir: bool) -> None:
     """
-    Download all spectral data files listed in the given MassIVE-KB metadata
-    file.
+    Download all peak files listed in the given MassIVE-KB metadata file.
 
-    Peak files will be stored in the `data/peak/{dataset}/{filename}`
-    directories.
+    Peak files will be stored in the given directory, optionally creating
+    individual subdirectories per dataset.
     Existing peak files will _not_ be downloaded again.
 
     Parameters
     ----------
     massivekb_filename : str
         The metadata file name.
+    dir_name : str
+        The local directory where the peak files will be stored.
+    dataset_subdir : bool
+        Create a separate subdirectory for each dataset or not.
     """
-    filenames = pd.read_csv(massivekb_filename, sep='\t', usecols=['filename'],
-                            squeeze=True).unique()
+    filenames = (pd.read_csv(massivekb_filename, sep='\t',
+                             usecols=['filename'])
+                 .drop_duplicates('filename'))
+    if not dataset_subdir:
+        filenames['dir_name'] = dir_name
+    else:
+        datasets = filenames.str.split('/', 1).str[0]
+        filenames['dir_name'] = datasets.apply(
+            lambda dataset: os.path.join(dir_name, dataset))
     logger.info('Download peak files from MassIVE')
-    joblib.Parallel(n_jobs=-1)(joblib.delayed(download_massive_file)(filename)
-                               for filename in filenames)
+    joblib.Parallel(n_jobs=-1)(
+        joblib.delayed(download_massive_file)(filename, dir_name)
+        for filename, dir_name in zip(filenames['filename'],
+                                      filenames['dir_name']))
 
 
 def generate_pairs_positive(metadata_filename: str,
