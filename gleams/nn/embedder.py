@@ -361,8 +361,6 @@ class Embedder:
 
         filename, ext = os.path.splitext(self.filename)
         filename_log = f'{filename}.log'
-        # CrocHistory has to be added after CSVLogger because it uses the same
-        # log file.
         callbacks = [ModelCheckpoint(filename + '.epoch{epoch:03d}' + ext),
                      ValidationCallback(validators, filename_log),
                      CSVLogger(filename_log)]
