@@ -242,7 +242,8 @@ def _embed_and_save(encodings: List[ss.csr_matrix], batch_size: int,
     filename : str
         File name to store the embedded encodings.
     """
-    logger.debug('Embed the spectrum encodings and save to file %s', filename)
+    logger.debug('Embed %d spectrum encodings and save to file %s',
+                 len(encodings), filename)
     encodings_generator = data_generator.EncodingsSequence(
         ss.vstack(encodings, 'csr'), batch_size, feature_split)
     np.save(filename, np.vstack(emb.embed(encodings_generator)))

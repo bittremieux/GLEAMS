@@ -118,8 +118,8 @@ class Embedder:
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
             self.num_gpu = strategy.num_replicas_in_sync
-            logger.info('Running the embedder model on %d GPU(s)',
-                        self.num_gpu)
+            logger.debug('Running the embedder model on %d GPU(s)',
+                         self.num_gpu)
 
     def _get_embedder_model(self) -> Model:
         """
