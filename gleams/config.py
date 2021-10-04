@@ -3,18 +3,10 @@ import os
 from gleams.feature import spectrum
 
 
-# MassIVE-KB metadata processing and pair generation.
-massivekb_task_id = '82c0124b'  # Version 2018-06-15.
-massivekb_filename = os.path.join(
-    os.environ['GLEAMS_HOME'], 'data', 'metadata',
-    f'LIBRARY_CREATION_AUGMENT_LIBRARY_TEST-{massivekb_task_id}-'
-    f'candidate_library_spectra-main.tsv')
-metadata_filename = os.path.join(
-    os.environ['GLEAMS_HOME'], 'data', 'metadata',
-    f'metadata_{massivekb_task_id}.parquet')
-model_filename = os.path.join(
-    os.environ['GLEAMS_HOME'], 'data', 'model',
-    f'gleams_{massivekb_task_id}.hdf5')
+# Metadata processing and pair generation.
+gleams_dir = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), os.pardir))
+model_filename = os.path.join(gleams_dir, 'data', 'gleams_82c0124b.hdf5')
 charges = 2, 5
 val_ratio = 0.1
 test_ratio = 0.1
@@ -55,7 +47,7 @@ num_fragment_features = spectrum.get_num_bins(fragment_mz_min, fragment_mz_max,
 
 # Reference spectra encoding.
 ref_spectra_filename = os.path.join(
-    os.environ['GLEAMS_HOME'], 'src', 'data', 'gleams_reference_spectra.mgf')
+    gleams_dir, 'data', 'gleams_reference_spectra.mgf')
 num_ref_spectra = 500
 fragment_mz_tol = 0.05  # Da
 
