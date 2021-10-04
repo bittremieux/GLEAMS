@@ -73,7 +73,8 @@ def convert_peaks_to_features(metadata_filename: str,
                               feat_filename: str,
                               precursor_encoding: Dict[str, Any],
                               fragment_encoding: Dict[str, Any],
-                              reference_encoding: Dict[str, Any]) -> None:
+                              reference_encoding: Dict[str, Any],
+                              filter_scans: bool = True) -> None:
     """
     Convert all peak files listed in the given metadata file to features.
 
@@ -100,6 +101,8 @@ def convert_peaks_to_features(metadata_filename: str,
         Settings for the fragment encoder.
     reference_encoding : Dict[str, Any]
         Settings for the reference spectrum encoder.
+    filter_scans: bool
+        Filter scans by the scan numbers specified in the metdata or not.
     """
     metadata = pd.read_parquet(metadata_filename)
     metadata = metadata.set_index(['dataset', 'filename', 'scan'])
@@ -131,7 +134,7 @@ def convert_peaks_to_features(metadata_filename: str,
             for filename, file_scans, file_encodings in\
                     joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
                         joblib.delayed(_peaks_to_features)
-                        (fn, md_fn,
+                        (fn, md_fn if filter_scans else None,
                          reference_encoding['preprocessing'], enc)
                         for fn, md_fn in metadata_dataset.groupby(
                             'filename', as_index=False, sort=False)):
