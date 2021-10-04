@@ -7,14 +7,13 @@ channels:
 dependencies:
   - airflow=1.10
   - binutils_linux-64=2.34
+  - click=7.1.2
   - cudatoolkit=10.1
   - faiss-gpu=1.6
   - gcc_linux-64=7.5
   - gxx_linux-64=7.5
   - joblib=0.16
-  - jupyter=1.0.0
   - libiconv=1.15
-  - matplotlib=3.3
   - numba=0.50
   - numpy=1.19
   - pandas=1.0
@@ -22,18 +21,11 @@ dependencies:
   - pyarrow=0.17
   - pyteomics=4.3
   - python=3.8
-  - rdkit=2020.03
   - scikit-learn=0.23
-  - scikit-optimize=0.7
   - scipy=1.5
-  - seaborn=0.10
-  - spectrum_utils=0.3
-  - tensorboard=2.2
+  - spectrum_utils=0.3.5
   - tensorflow-gpu=2.2
   - tqdm=4.48
-  - umap-learn=0.4
   - pip:
-    - apricot-select==0.5
     - multiprocessing-logging==0.3
-    - tensorflow-addons==0.10
 prefix: $HOME/.conda/envs/gleams
