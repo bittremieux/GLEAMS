@@ -18,8 +18,7 @@ logger = logging.getLogger('gleams')
 
 def _peaks_to_features(filename: str,
                        metadata: Optional[pd.DataFrame],
-                       fragment_mz_min: float,
-                       fragment_mz_max: float,
+                       spectrum_preprocessing: Dict[str, Any],
                        enc: encoder.SpectrumEncoder)\
         -> Tuple[str, Optional[pd.DataFrame], Optional[List[ss.csr_matrix]]]:
     """
@@ -34,10 +33,8 @@ def _peaks_to_features(filename: str,
         DataFrame containing metadata for the PSMs in the peak file to be
         processed. If None, all spectra in the peak file are converted to
         features.
-    fragment_mz_min : float
-        The minimum m/z for spectrum peaks.
-    fragment_mz_max : float
-        The maximum m/z for spectrum peaks.
+    spectrum_preprocessing: Dict[str, Any]
+        Spectrum preprocessing settings.
     enc : encoder.SpectrumEncoder
         The SpectrumEncoder used to convert spectra to features.
 
@@ -61,7 +58,7 @@ def _peaks_to_features(filename: str,
         # noinspection PyUnresolvedReferences
         if ((metadata is None or np.int64(spec.identifier) in metadata.index)
                 and spectrum.preprocess(
-                    spec, fragment_mz_min, fragment_mz_max).is_valid):
+                    spec, **spectrum_preprocessing).is_valid):
             file_scans.append(spec.identifier)
             file_mz.append(spec.precursor_mz)
             file_charge.append(spec.precursor_charge)
@@ -75,8 +72,6 @@ def _peaks_to_features(filename: str,
 def convert_peaks_to_features(metadata_filename: str,
                               feat_filename: str,
                               peak_dir: str,
-                              fragment_mz_min: float,
-                              fragment_mz_max: float,
                               precursor_encoding: Dict[str, Any],
                               fragment_encoding: Dict[str, Any],
                               reference_encoding: Dict[str, Any]) -> None:
@@ -103,10 +98,6 @@ def convert_peaks_to_features(metadata_filename: str,
     peak_dir : str
         Directory in which the peak files are stored (in subdirectories per
         dataset).
-    fragment_mz_min : float
-        The minimum m/z for spectrum peaks.
-    fragment_mz_max : float
-        The maximum m/z for spectrum peaks.
     precursor_encoding : Dict[str, Any]
         Settings for the precursor encoder.
     fragment_encoding : Dict[str, Any]
@@ -145,7 +136,7 @@ def convert_peaks_to_features(metadata_filename: str,
                     joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
                         joblib.delayed(_peaks_to_features)
                         (os.path.join(peak_dir, fn), md_fn,
-                         fragment_mz_min, fragment_mz_max, enc)
+                         reference_encoding['preprocessing'], enc)
                         for fn, md_fn in metadata_dataset.groupby(
                             'filename', as_index=False, sort=False)):
                 if file_scans is not None and len(file_scans) > 0:
