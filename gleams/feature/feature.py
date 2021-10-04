@@ -71,7 +71,6 @@ def _peaks_to_features(filename: str,
 
 def convert_peaks_to_features(metadata_filename: str,
                               feat_filename: str,
-                              peak_dir: str,
                               precursor_encoding: Dict[str, Any],
                               fragment_encoding: Dict[str, Any],
                               reference_encoding: Dict[str, Any]) -> None:
@@ -95,9 +94,6 @@ def convert_peaks_to_features(metadata_filename: str,
     feat_filename : str
         The feature file name to store the encoded spectra. Should have a
         ".npz" extension.
-    peak_dir : str
-        Directory in which the peak files are stored (in subdirectories per
-        dataset).
     precursor_encoding : Dict[str, Any]
         Settings for the precursor encoder.
     fragment_encoding : Dict[str, Any]
@@ -135,7 +131,7 @@ def convert_peaks_to_features(metadata_filename: str,
             for filename, file_scans, file_encodings in\
                     joblib.Parallel(n_jobs=-1, backend='multiprocessing')(
                         joblib.delayed(_peaks_to_features)
-                        (os.path.join(peak_dir, fn), md_fn,
+                        (fn, md_fn,
                          reference_encoding['preprocessing'], enc)
                         for fn, md_fn in metadata_dataset.groupby(
                             'filename', as_index=False, sort=False)):
