@@ -34,24 +34,38 @@ pip install git+https://github.com/bittremieux/GLEAMS.git
 Using GLEAMS
 ------------
 
-GLEAMS provides command-line functionality to convert MS/MS spectra in peak files to 32-dimensional embeddings. Example:
-
-```
-gleams *.mzML
-```
-
-This will read the MS/MS spectra from all matched mzML files and export the results to a two-dimensional NumPy array of dimension _n_ x 32, with _n_ the number of MS/MS spectra read from the mzML files.
-Additionally, a tabular file in the Parquet format will be created containing corresponding metadata for the embedded spectra.
-
-For more information, see the command-line help message:
+For detailed usage information, see the command-line help message:
 
 ```
 gleams --help
 ```
 
+### Spectrum embedding
+
+GLEAMS provides the `gleams embed` command to convert MS/MS spectra in peak files to 32-dimensional embeddings. Example:
+
+```
+gleams embed *.mzML --embed_name GLEAMS.embed
+```
+
+This will read the MS/MS spectra from all matched mzML files and export the results to a two-dimensional NumPy array of dimension _n_ x 32 in file `GLEAMS.embed.npy`, with _n_ the number of MS/MS spectra read from the mzML files.
+Additionally, a tabular file `GLEAMS.embed.parquet` will be created containing corresponding metadata for the embedded spectra.
+
+### Embedding clustering
+
+After converting the MS/MS spectra to 32-dimensional embeddings, they can be clustered to group spectra with similar embeddings using the `gleams cluster` command. Example:
+
+```
+gleams cluster --embed_name GLEAMS.embed --cluster_name GLEAMS.cluster --eps 0.05
+```
+
+This will perform DBSCAN clustering on the embeddings.
+The output will be written to the `GLEAMS.cluster.npy` NumPy file with cluster labels per embedding (`-1` indicates noise, minimum cluster size 2).
+Additionally, a tabular file `GLEAMS.cluster.parquet` will be created containing corresponding metadata for the clustered spectra.
+Note that although this `GLEAMS.cluster.parquet` metadata file contains information for the same spectra as the `GLEAMS.embed.parquet` metadata file, the order of the spectra (matching the clustering results) is different.
+
 Contact
 -------
 
-For more information you can visit the
-[official code website](https://github.com/bittremieux/GLEAMS) or send an email to <wbittremieux@health.ucsd.edu>.
+For more information you can visit the [official code website](https://github.com/bittremieux/GLEAMS) or send an email to <wbittremieux@health.ucsd.edu>.
  
