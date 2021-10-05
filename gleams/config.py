@@ -1,12 +1,12 @@
 import os
+import sys
 
 from gleams.feature import spectrum
 
 
 # Metadata processing and pair generation.
-gleams_dir = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), os.pardir))
-model_filename = os.path.join(gleams_dir, 'data', 'gleams_82c0124b.hdf5')
+model_filename = os.path.join(
+    sys.prefix, 'gleams', 'data', 'gleams_82c0124b.hdf5')
 charges = 2, 5
 val_ratio = 0.1
 test_ratio = 0.1
@@ -47,7 +47,7 @@ num_fragment_features = spectrum.get_num_bins(fragment_mz_min, fragment_mz_max,
 
 # Reference spectra encoding.
 ref_spectra_filename = os.path.join(
-    gleams_dir, 'data', 'gleams_reference_spectra.mgf')
+    sys.prefix, 'gleams', 'data', 'gleams_reference_spectra.mgf')
 num_ref_spectra = 500
 fragment_mz_tol = 0.05  # Da
 
