@@ -34,10 +34,12 @@ pip install git+https://github.com/bittremieux/GLEAMS.git
 Using GLEAMS
 ------------
 
-For detailed usage information, see the command-line help message:
+For detailed usage information, see the command-line help messages:
 
 ```
 gleams --help
+gleams embed --help
+gleams cluster --help
 ```
 
 ### Spectrum embedding
