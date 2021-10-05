@@ -20,7 +20,16 @@ If you use GLEAMS in your work, please cite the following publication:
 Installation
 ------------
 
-GLEAMS requires Python 3.6+ and a Linux operating system.
+GLEAMS requires Python 3.8, a Linux operating system, and a CUDA-enabled GPU.
+
+1. Create a Conda environment and install the necessary compiler tools and GPU runtime:
+```
+conda env create -f https://raw.githubusercontent.com/bittremieux/GLEAMS/master/environment.yml && conda activate gleams
+```
+2. Install GLEAMS:
+```
+pip install git+https://github.com/bittremieux/GLEAMS.git
+```
 
 Running GLEAMS
 --------------
