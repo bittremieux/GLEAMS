@@ -22,23 +22,31 @@ rndm.set_seeds()
 
 from . import __version__
 from . import config
+from .cluster import cluster
 from .nn import nn
 
 
 logger = logging.getLogger('gleams')
 
 
-@click.command('embed')
+@click.group()
+def gleams():
+    pass
+
+
+@gleams.command('embed')
 @click.argument('peak_in', nargs=-1, required=True)
 @click.option(
-    '--name_out', default='GLEAMS',
+    '--embed_name', default='GLEAMS.embed',
     help='The output will be written to the current working directory with the'
-         ' specified name (default: "GLEAMS"). The output consists of a NumPy '
-         'file containing the GLEAMS embeddings (extension ".npy") and a '
-         'Parquet file containing the corresponding MS/MS spectra metadata '
+         ' specified name (default: "GLEAMS.embed"). The output consists of a '
+         'NumPy file containing the GLEAMS embeddings (extension ".npy") and '
+         'a Parquet file containing the corresponding MS/MS spectra metadata '
          '(extension ".parquet").')
-def embed(peak_in: List[str], name_out: str):
+def cli_embed(peak_in: List[str], embed_name: str) -> None:
     """
+    Embed spectra.
+
     Convert MS/MS spectra in the PEAK_IN peak files to 32-dimensional
     embeddings using the GLEAMS deep learning model.
 
@@ -56,7 +64,7 @@ def embed(peak_in: List[str], name_out: str):
     os.mkdir(embed_dir)
     # Create a metadata file with the file names.
     metadata = pd.DataFrame({'filename': peak_in})
-    metadata['dataset'] = name_out
+    metadata['dataset'] = 'GLEAMS'
     metadata.to_parquet(metadata_filename, index=False)
     # Embed the spectra.
     precursor_encoding = {'num_bits_mz': config.num_bits_precursor_mz,
@@ -86,10 +94,64 @@ def embed(peak_in: List[str], name_out: str):
                        'num_fragment_features': config.num_fragment_features,
                        'num_ref_spectra_features': config.num_ref_spectra,
                        'lr': config.lr}
-    nn.embed(metadata_filename, config.model_filename, f'{name_out}.npy',
+    nn.embed(metadata_filename, config.model_filename, f'{embed_name}.npy',
              embed_dir, precursor_encoding, fragment_encoding,
              reference_encoding, embedder_config, config.batch_size,
              config.charges)
+    # Clean up intermediate files.
+    shutil.rmtree(temp_dir)
 
+
+@gleams.command('cluster')
+@click.option(
+    '--embed_name', default='GLEAMS.embed',
+    help='Name of the GLEAMS embeddings (default: "GLEAMS.embed"). Both a '
+         'NumPy file and a Parquet file should be present in the current '
+         'working directory.')
+@click.option(
+    '--cluster_name', default='GLEAMS.cluster',
+    help='The output will be written to the current working directory with the'
+         ' specified name (default: "GLEAMS.cluster"). The output consists of '
+         'a NumPy file containing the cluster labels (extension ".npy") and '
+         'a Parquet file containing the corresponding MS/MS spectra metadata '
+         '(extension ".parquet"). Attention: the spectrum order in this '
+         'metadata file differs from the order in the embedding metadata '
+         'file.')
+@click.option(
+    '--eps', default=0.05,
+    help='The maximum Euclidean distance between embeddings to be considered '
+         'in each other\'s neighborhood during DBSCAN clustering '
+         '(default: 0.05).'
+)
+def cli_cluster(embed_name: str, cluster_name: str, eps: float) -> None:
+    """
+    Cluster embeddings.
+
+    Cluster GLEAMS embeddings using DBSCAN to find spectra matching the same
+    peptide.
+    """
+    logger.info('GLEAMS version %s', str(__version__))
+
+    # Create temporary working directory.
+    temp_dir = tempfile.mkdtemp()
+    dist_filename = os.path.join(temp_dir, f'{embed_name}.npz')
+    # Compute the pairwise distance to a temporary file.
+    cluster.compute_pairwise_distances(
+        f'{embed_name}.npy', f'{embed_name}.parquet', dist_filename,
+        config.precursor_tol_mass, config.precursor_tol_mode,
+        config.mz_interval, config.num_neighbors, config.num_neighbors_ann,
+        config.num_probe, config.batch_size_add, config.batch_size_dist,
+        config.charges)
+    # Move the metadata file to the working directory.
+    shutil.move(os.path.join(temp_dir, f'{embed_name}.parquet'),
+                f'{cluster_name}.parquet')
+    # Remove previous result (if applicable).
+    if os.path.isfile(f'{cluster_name}.npy'):
+        os.remove(f'{cluster_name}.npy')
+    # DBSCAN clustering.
+    cluster.cluster(
+        dist_filename, f'{cluster_name}.parquet', f'{cluster_name}.npy',
+        eps, config.min_samples, config.precursor_tol_mass,
+        config.precursor_tol_mode)
     # Clean up intermediate files.
     shutil.rmtree(temp_dir)

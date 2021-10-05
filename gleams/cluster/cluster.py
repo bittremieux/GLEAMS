@@ -2,6 +2,7 @@ import gc
 import logging
 import math
 import os
+import warnings
 from typing import Iterator, List, Optional, Tuple
 
 import faiss
@@ -82,6 +83,8 @@ def compute_pairwise_distances(embeddings_filename: str,
     if (os.path.isfile(dist_filename) and
             os.path.isfile(embeddings_dist_filename) and
             os.path.isfile(metadata_dist_filename)):
+        warnings.warn('The pairwise distance matrix file already exists and '
+                      'was not recomputed')
         return
     metadata = pd.read_parquet(metadata_filename).sort_values(['charge', 'mz'])
     metadata = metadata[metadata['charge'].isin(
@@ -254,7 +257,7 @@ def _build_ann_index(index_filename: str, embeddings: np.ndarray,
                              charge, int(mz), int(mz + mz_interval),
                              num_index_embeddings, num_list)
                 # Create a suitable index and compute cluster centroids.
-                embedding_size = embeddings.shape[0]
+                embedding_size = embeddings.shape[1]
                 if num_list <= 0:
                     index = faiss.IndexIDMap(
                         faiss.IndexFlatL2(embedding_size))
@@ -552,9 +555,9 @@ def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
             else np.partition(idx, max_neighbors)[:max_neighbors])
 
 
-def cluster(distances_filename: str, metadata_filename: str, eps: float,
-            min_samples: int, precursor_tol_mass: float,
-            precursor_tol_mode: str) -> None:
+def cluster(distances_filename: str, metadata_filename: str,
+            clusters_filename: str, eps: float, min_samples: int,
+            precursor_tol_mass: float, precursor_tol_mode: str) -> None:
     """
     DBSCAN clustering of the embeddings based on a pairwise distance matrix.
 
@@ -565,6 +568,9 @@ def cluster(distances_filename: str, metadata_filename: str, eps: float,
         clustering.
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
+    clusters_filename : str
+        File name to export the clustering results. Must have the ".npy"
+        extension.
     eps : float
         The eps DBSCAN parameter.
     min_samples : int
@@ -574,9 +580,9 @@ def cluster(distances_filename: str, metadata_filename: str, eps: float,
     precursor_tol_mode : Optional[str]
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
     """
-    clusters_filename = (distances_filename.replace('dist_', 'clusters_')
-                                           .replace('.npz', '.npy'))
     if os.path.isfile(clusters_filename):
+        warnings.warn('The clustering results file already exists and was '
+                      'not recomputed')
         return
 
     # DBSCAN clustering of the embeddings.
