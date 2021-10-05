@@ -31,10 +31,23 @@ conda env create -f https://raw.githubusercontent.com/bittremieux/GLEAMS/master/
 pip install git+https://github.com/bittremieux/GLEAMS.git
 ```
 
-Running GLEAMS
---------------
+Using GLEAMS
+------------
 
-_More information will be provided here soon._
+GLEAMS provides command-line functionality to convert MS/MS spectra in peak files to 32-dimensional embeddings. Example:
+
+```
+gleams *.mzML
+```
+
+This will read the MS/MS spectra from all matched mzML files and export the results to a two-dimensional NumPy array of dimension _n_ x 32, with _n_ the number of MS/MS spectra read from the mzML files.
+Additionally, a tabular file in the Parquet format will be created containing corresponding metadata for the embedded spectra.
+
+For more information, see the command-line help message:
+
+```
+gleams --help
+```
 
 Contact
 -------
