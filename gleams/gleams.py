@@ -30,22 +30,22 @@ logger = logging.getLogger('gleams')
 
 @click.command('embed')
 @click.argument('peak_in', nargs=-1, required=True)
-@click.argument('embed_out', required=True)
-def embed(peak_in: List[str], embed_out: str):
+@click.option(
+    '--name_out', default='GLEAMS',
+    help='The output will be written to the current working directory with the'
+         ' specified name (default: "GLEAMS"). The output consists of a NumPy '
+         'file containing the GLEAMS embeddings (extension ".npy") and a '
+         'Parquet file containing the corresponding MS/MS spectra metadata '
+         '(extension ".parquet").')
+def embed(peak_in: List[str], name_out: str):
     """
-    Convert MS/MS spectra in PEAK_IN to 32-dimensional embeddings written to
-    EMBED_OUT using the GLEAMS deep learning model.
+    Convert MS/MS spectra in the PEAK_IN peak files to 32-dimensional
+    embeddings using the GLEAMS deep learning model.
 
     Supported formats for peak files in PEAK_IN are: mzML, mzXML, MGF.
-
-    EMBED_OUT must have the ".npy" extension.
-    A metadata file with the same base name as EMBED_OUT and the ".parquet"
-    extension will be created as well.
     """
     if len(peak_in) == 0:
         raise click.BadParameter('No input peak files specified')
-    if os.path.splitext(embed_out)[1].lower() != ".npy":
-        raise click.BadParameter('EMBED_OUT should have the ".npy" extension')
 
     logger.info('GLEAMS version %s', str(__version__))
 
@@ -56,7 +56,7 @@ def embed(peak_in: List[str], embed_out: str):
     os.mkdir(embed_dir)
     # Create a metadata file with the file names.
     metadata = pd.DataFrame({'filename': peak_in})
-    metadata['dataset'] = os.path.splitext(os.path.basename(embed_out))[0]
+    metadata['dataset'] = name_out
     metadata.to_parquet(metadata_filename, index=False)
     # Embed the spectra.
     precursor_encoding = {'num_bits_mz': config.num_bits_precursor_mz,
@@ -86,9 +86,10 @@ def embed(peak_in: List[str], embed_out: str):
                        'num_fragment_features': config.num_fragment_features,
                        'num_ref_spectra_features': config.num_ref_spectra,
                        'lr': config.lr}
-    nn.embed(metadata_filename, config.model_filename, embed_out, embed_dir,
-             precursor_encoding, fragment_encoding, reference_encoding,
-             embedder_config, config.batch_size, config.charges)
+    nn.embed(metadata_filename, config.model_filename, f'{name_out}.npy',
+             embed_dir, precursor_encoding, fragment_encoding,
+             reference_encoding, embedder_config, config.batch_size,
+             config.charges)
 
     # Clean up intermediate files.
     shutil.rmtree(temp_dir)
