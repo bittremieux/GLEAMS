@@ -2,30 +2,12 @@ name: gleams
 channels:
   - defaults
   - conda-forge
-  - bioconda
-  - pytorch
 dependencies:
-  - airflow=1.10
-  - binutils_linux-64=2.34
-  - click=7.1.2
-  - cudatoolkit=10.1
-  - faiss-gpu=1.6
-  - gcc_linux-64=7.5
-  - gxx_linux-64=7.5
-  - joblib=0.16
-  - libiconv=1.15
-  - numba=0.50
-  - numpy=1.19
-  - pandas=1.0
-  - pip=20.1
-  - pyarrow=0.17
-  - pyteomics=4.3
-  - python=3.8
-  - scikit-learn=0.23
-  - scipy=1.5
-  - spectrum_utils=0.3.5
-  - tensorflow-gpu=2.2
-  - tqdm=4.48
-  - pip:
-    - multiprocessing-logging==0.3
+  - binutils_linux-64=2.36
+  - cudnn=8.2.1
+  - cudatoolkit=11.3.1
+  - gcc_linux-64=11.2.0
+  - gxx_linux-64=11.2.0
+  - libiconv=1.16
+  - python=3.9
 prefix: $HOME/.conda/envs/gleams
