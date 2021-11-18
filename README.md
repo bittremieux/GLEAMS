@@ -28,7 +28,7 @@ conda env create -f https://raw.githubusercontent.com/bittremieux/GLEAMS/master/
 ```
 2. Install GLEAMS:
 ```
-pip install git+https://github.com/bittremieux/GLEAMS.git
+pip3 install git+https://github.com/bittremieux/GLEAMS.git
 ```
 
 Using GLEAMS
