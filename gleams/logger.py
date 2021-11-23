@@ -25,7 +25,6 @@ def init():
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     # Disable dependency non-critical log messages.
     logging.getLogger('airflow').setLevel(logging.WARNING)
-    logging.getLogger('faiss').setLevel(logging.WARNING)
     logging.getLogger('h5py').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('numba').setLevel(logging.WARNING)
