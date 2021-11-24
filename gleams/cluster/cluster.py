@@ -1,11 +1,9 @@
-import gc
 import logging
-import math
 import os
 import warnings
 from typing import Iterator, List, Optional, Tuple
 
-import faiss
+import fastcluster
 import joblib
 import numba as nb
 import numpy as np
@@ -14,667 +12,182 @@ import scipy.sparse as ss
 import spectrum_utils.utils as suu
 import tqdm
 from scipy.cluster.hierarchy import fcluster
-# noinspection PyProtectedMember
-from sklearn.cluster._dbscan_inner import dbscan_inner
+from scipy.spatial.distance import pdist
 
 
 logger = logging.getLogger('gleams')
 
 
-def compute_pairwise_distances(embeddings_filename: str,
-                               metadata_filename: str,
-                               dist_filename: str,
-                               precursor_tol_mass: float,
-                               precursor_tol_mode: str,
-                               mz_interval: float,
-                               num_neighbors: int,
-                               num_neighbors_ann: int,
-                               num_probe: int,
-                               batch_size_add: int,
-                               batch_size_dist: int,
-                               charges: Optional[Tuple[int]] = None) -> None:
+def cluster(embeddings_filename: str, metadata_filename: str,
+            clusters_filename: str, precursor_tol_mass: float,
+            precursor_tol_mode: str, linkage: str, distance_threshold: float,
+            charges: Optional[Tuple[int]] = None) -> None:
     """
-    Compute a pairwise distance matrix for the embeddings in the given file.
+    Cluster the GLEAMS embeddings.
 
     Parameters
     ----------
     embeddings_filename : str
-        NumPy file containing the embedding vectors for which to compute
-        pairwise distances.
-    metadata_filename : str
-        Metadata file with precursor m/z information for all embeddings.
-    dist_filename : str
-        File name to export the pairwise distance matrix. Must have the ".npz"
-        extension.
-    precursor_tol_mass : float
-        The value of the precursor m/z tolerance.
-    precursor_tol_mode : Optional[str]
-        The unit of the precursor m/z tolerance ('Da' or 'ppm').
-    mz_interval : float
-        Width of the m/z interval for separate ANN indexes.
-    num_neighbors : int
-        The number of neighbors to consider for each embedding.
-    num_neighbors_ann : int
-        The number of neighbors to retrieve from the NN index for each
-        embedding.
-    num_probe: int
-        The number of cells to consider during searching.
-    batch_size_add : int
-        The batch size to add vectors to the NN index.
-    batch_size_dist : int
-        The batch size to query vectors from the NN index.
-    charges : Optional[Tuple[int]]
-        Optional tuple of minimum and maximum precursor charge (both inclusive)
-        to include, spectra with other precursor charges will be omitted.
-    """
-    cluster_dir = os.path.dirname(dist_filename)
-    if not os.path.exists(cluster_dir):
-        os.mkdir(cluster_dir)
-    ann_dir = os.path.join(cluster_dir, 'ann')
-    if not os.path.exists(ann_dir):
-        os.mkdir(ann_dir)
-    index_filename = os.path.splitext(os.path.basename(dist_filename))[0]
-    index_filename = os.path.join(ann_dir, index_filename + '_{}_{}.faiss')
-    neighbors_filename = dist_filename.replace('.npz', '_{}.npy')
-    embeddings_dist_filename = os.path.join(
-        cluster_dir, os.path.basename(embeddings_filename))
-    metadata_dist_filename = os.path.join(
-        cluster_dir, os.path.basename(metadata_filename))
-    if (os.path.isfile(dist_filename) and
-            os.path.isfile(embeddings_dist_filename) and
-            os.path.isfile(metadata_dist_filename)):
-        warnings.warn('The pairwise distance matrix file already exists and '
-                      'was not recomputed')
-        return
-    metadata = pd.read_parquet(metadata_filename).sort_values(['charge', 'mz'])
-    metadata = metadata[metadata['charge'].isin(
-        np.arange(charges[0], charges[1] + 1))].reset_index()
-    num_embeddings = len(metadata)
-    if num_embeddings > np.iinfo(np.int64).max:
-        raise OverflowError('Too many embedding indexes to fit into int64')
-    # Sort the embeddings and metadata in the same order as the pairwise
-    # distance matrix.
-    index, charge_mz = metadata['index'], metadata[['charge', 'mz']]
-    logger.debug('Save the metadata to file %s', metadata_dist_filename)
-    metadata.drop(columns='index', inplace=True)
-    metadata.to_parquet(metadata_dist_filename, index=False)
-    embeddings = np.load(embeddings_filename, mmap_mode='r')[index]
-    logger.debug('Save the reordered embeddings to file %s',
-                 embeddings_dist_filename)
-    np.save(embeddings_dist_filename, embeddings)
-    min_mz, max_mz = charge_mz['mz'].min(), charge_mz['mz'].max()
-    mz_splits = np.arange(math.floor(min_mz / mz_interval) * mz_interval,
-                          math.ceil(max_mz / mz_interval) * mz_interval,
-                          mz_interval)
-    # Calculate pairwise distances.
-    num_probe, num_neighbors = _check_ann_config(num_probe, num_neighbors)
-    logging.info('Compute pairwise distances between neighboring embeddings '
-                 '(%d embeddings, %d neighbors)', num_embeddings,
-                 num_neighbors)
-    if (not os.path.isfile(neighbors_filename.format('data')) or
-            not os.path.isfile(neighbors_filename.format('indices')) or
-            not os.path.isfile(neighbors_filename.format('indptr'))):
-        # Create the ANN indexes (if this hasn't been done yet).
-        _build_ann_index(index_filename, embeddings,
-                         charge_mz[['charge', 'mz']], mz_splits, mz_interval,
-                         precursor_tol_mass, precursor_tol_mode,
-                         batch_size_add)
-        max_num_embeddings = embeddings.shape[0] * num_neighbors
-        dtype = (np.int32 if max_num_embeddings < np.iinfo(np.int32).max
-                 else np.int64)
-        distances = np.zeros(max_num_embeddings, np.float32)
-        indices = np.zeros(max_num_embeddings, dtype)
-        indptr = np.zeros(num_embeddings + 1, dtype)
-        with tqdm.tqdm(total=charge_mz['charge'].nunique() * len(mz_splits),
-                       desc='Distances calculated', unit='index') as pbar:
-            for charge, precursors_charge in (charge_mz[['charge', 'mz']]
-                                              .groupby('charge')):
-                for mz in mz_splits:
-                    _dist_mz_interval(
-                        index_filename, embeddings, precursors_charge['mz'],
-                        distances, indices, indptr, charge, mz, mz_interval,
-                        num_probe, num_neighbors, num_neighbors_ann,
-                        batch_size_dist, precursor_tol_mass,
-                        precursor_tol_mode)
-                    pbar.update(1)
-        distances, indices = distances[:indptr[-1]], indices[:indptr[-1]]
-        np.save(neighbors_filename.format('data'), distances)
-        np.save(neighbors_filename.format('indices'), indices)
-        np.save(neighbors_filename.format('indptr'), indptr)
-    else:
-        distances = np.load(neighbors_filename.format('data'))
-        indices = np.load(neighbors_filename.format('indices'))
-        indptr = np.load(neighbors_filename.format('indptr'))
-    # Convert to a sparse pairwise distance matrix. This matrix might not be
-    # entirely symmetrical, but that shouldn't matter too much.
-    logger.debug('Construct pairwise distance matrix')
-    pairwise_dist_matrix = ss.csr_matrix(
-        (distances, indices, indptr), (num_embeddings, num_embeddings),
-        np.float32, False)
-    logger.debug('Save the pairwise distance matrix to file %s', dist_filename)
-    ss.save_npz(dist_filename, pairwise_dist_matrix, False)
-    logger.debug('Clean up temporary pairwise distance files %s',
-                 neighbors_filename)
-    os.remove(neighbors_filename.format('data'))
-    os.remove(neighbors_filename.format('indices'))
-    os.remove(neighbors_filename.format('indptr'))
-
-
-def _check_ann_config(num_probe: int, num_neighbors: int) -> Tuple[int, int]:
-    """
-    Make sure that the configuration values adhere to the limitations imposed
-    by running Faiss on a GPU.
-    GPU indexes can only handle maximum 1024 probes and neighbors.
-    https://github.com/facebookresearch/faiss/wiki/Faiss-on-the-GPU#limitations
-    """
-    if num_probe > 1024:
-        logger.warning('Using num_probe=1024 (maximum supported value for '
-                       'GPU-enabled ANN indexing), %d was supplied', num_probe)
-        num_probe = 1024
-    if num_neighbors > 1024:
-        logger.warning('Using num_neighbours=1024 (maximum supported value '
-                       'for GPU-enabled ANN indexing), %d was supplied',
-                       num_neighbors)
-        num_neighbors = 1024
-    return num_probe, num_neighbors
-
-
-def _build_ann_index(index_filename: str, embeddings: np.ndarray,
-                     precursors: pd.DataFrame, mz_splits: np.ndarray,
-                     mz_interval: float, precursor_tol_mass: float,
-                     precursor_tol_mode: str, batch_size_add: int) -> None:
-    """
-    Create ANN indexes for the given embedding vectors.
-
-    Vectors will be split over multiple ANN indexes based on the given m/z
-    interval.
-
-    Parameters
-    ----------
-    index_filename: str
-        Base file name of the ANN index. Separate indexes for the given m/z
-        splits will be created.
-    embeddings: np.ndarray
-        The embedding vectors to build the ANN index.
-    precursors : pd.DataFrame
-        Precursor charges and m/z's corresponding to the embedding vectors used
-        to split the embeddings over multiple ANN indexes per charge and m/z
-        interval.
-    mz_splits: np.ndarray
-        M/z splits used to create separate ANN indexes.
-    mz_interval : float
-        Width of the m/z interval for separate ANN indexes.
-    precursor_tol_mass : float
-        The value of the precursor m/z tolerance.
-    precursor_tol_mode : Optional[str]
-        The unit of the precursor m/z tolerance ('Da' or 'ppm').
-    batch_size_add : int
-        The batch size to add vectors to the NN index.
-    """
-    logger.debug('Use %d GPUs for ANN index construction',
-                 faiss.get_num_gpus())
-    # Create separate indexes per precursor charge and with precursor m/z in
-    # the specified intervals.
-    with tqdm.tqdm(total=precursors['charge'].nunique() * len(mz_splits),
-                   desc='Indexes built', unit='index') as progressbar:
-        for charge, precursors_charge in precursors.groupby('charge'):
-            for mz in mz_splits:
-                progressbar.update(1)
-                if os.path.isfile(index_filename.format(charge, mz)):
-                    continue
-                # Create an ANN index using Euclidean distance
-                # for fast NN queries.
-                start_i, stop_i = _get_precursor_mz_interval_ids(
-                    precursors_charge['mz'].values, mz, mz_interval,
-                    precursor_tol_mode, precursor_tol_mass)
-                index_embeddings_ids = (precursors_charge.index
-                                        .values[start_i:stop_i])
-                num_index_embeddings = len(index_embeddings_ids)
-                # Figure out a decent value for the num_list hyperparameter
-                # based on the number of embeddings.
-                # Rules of thumb from the Faiss wiki:
-                # https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index#how-big-is-the-dataset
-                if num_index_embeddings == 0:
-                    continue
-                if num_index_embeddings < 10e2:
-                    # Use a brute-force index instead of an ANN index
-                    # when there are only a few items.
-                    num_list = -1
-                elif num_index_embeddings < 10e5:
-                    num_list = 2**math.floor(math.log2(
-                        num_index_embeddings / 39))
-                elif num_index_embeddings < 10e6:
-                    num_list = 2**16
-                elif num_index_embeddings < 10e7:
-                    num_list = 2**18
-                else:
-                    num_list = 2**20
-                    if num_index_embeddings > 10e8:
-                        logger.warning('More than 1B embeddings to be indexed,'
-                                       ' consider decreasing the ANN size')
-                logger.debug('Build the ANN index for precursor charge %d and '
-                             'precursor m/z %d–%d (%d embeddings, %d lists)',
-                             charge, int(mz), int(mz + mz_interval),
-                             num_index_embeddings, num_list)
-                # Create a suitable index and compute cluster centroids.
-                embedding_size = embeddings.shape[1]
-                if num_list <= 0:
-                    index = faiss.IndexIDMap(
-                        faiss.IndexFlatL2(embedding_size))
-                else:
-                    index = faiss.IndexIVFFlat(
-                        faiss.IndexFlatL2(embedding_size),
-                        embedding_size, num_list, faiss.METRIC_L2)
-                index_embeddings = embeddings[index_embeddings_ids]
-                # noinspection PyArgumentList
-                index.train(index_embeddings)
-                # Add the embeddings to the index in batches.
-                logger.debug('Add %d embeddings to the ANN index',
-                             num_index_embeddings)
-                batch_size = min(num_index_embeddings, batch_size_add)
-                for batch_start in range(0, num_index_embeddings, batch_size):
-                    batch_stop = min(batch_start + batch_size,
-                                     num_index_embeddings)
-                    # noinspection PyArgumentList
-                    index.add_with_ids(
-                        index_embeddings[batch_start:batch_stop],
-                        index_embeddings_ids[batch_start:batch_stop])
-                # Save the index to disk.
-                logger.debug('Save the ANN index to file %s',
-                             index_filename.format(charge, mz))
-                faiss.write_index(index, index_filename.format(charge, mz))
-                index.reset()
-
-
-def _dist_mz_interval(index_filename: str, embeddings: np.ndarray,
-                      precursor_mzs: pd.Series, distances: np.ndarray,
-                      indices: np.ndarray, indptr: np.ndarray, charge: int,
-                      mz: int, mz_interval: float, num_probe: int,
-                      num_neighbors: int, num_neighbors_ann: int,
-                      batch_size: int, precursor_tol_mass: float,
-                      precursor_tol_mode: str) -> None:
-    """
-    Compute distances to the nearest neighbors for the given precursor m/z
-    interval.
-
-    Parameters
-    ----------
-    index_filename: str
-        Base file name of the ANN index. The specific index for the given m/z
-        will be used.
-    embeddings: np.ndarray
-        The embedding vectors.
-    precursor_mzs: pd.Series
-        Precursor m/z's corresponding to the embedding vectors.
-    distances : np.ndarray
-        The nearest neighbor distances.
-        See `scipy.sparse.csr_matrix` (`data`).
-    indices : np.ndarray
-        The column indices for the nearest neighbor distances.
-        See `scipy.sparse.csr_matrix`.
-    indptr : np.ndarray
-        The index pointers for the nearest neighbor distances.
-        See `scipy.sparse.csr_matrix`.
-    charge : int
-        The active precursor charge to load the ANN index.
-    mz : int
-        The active precursor m/z split to load the ANN index.
-    num_probe : int
-        The number of cells to consider during searching.
-    num_neighbors : int
-        The number of neighbors to consider for each embedding.
-    num_neighbors_ann : int
-        The number of neighbors to retrieve from the NN index for each
-        embedding.
-    batch_size : int
-        The batch size to query vectors from the NN index.
-    precursor_tol_mass : float
-        The value of the precursor m/z tolerance.
-    precursor_tol_mode : Optional[str]
-        The unit of the precursor m/z tolerance ('Da' or 'ppm').
-    """
-    if not os.path.isfile(index_filename.format(charge, mz)):
-        return
-    index = _load_ann_index(index_filename.format(charge, mz), num_probe)
-    start_i, stop_i = _get_precursor_mz_interval_ids(
-        precursor_mzs.values, mz, mz_interval, None, 0)
-    for batch_start in range(start_i, stop_i, batch_size):
-        batch_stop = min(batch_start + batch_size, stop_i)
-        batch_ids = precursor_mzs.index.values[batch_start:batch_stop]
-        # Find nearest neighbors using ANN index searching.
-        # noinspection PyArgumentList
-        nn_dists, nn_idx_ann = index.search(
-            embeddings[batch_ids], num_neighbors_ann)
-        # Filter the neighbors based on the precursor m/z tolerance and assign
-        # distances.
-        _filter_neighbors_mz(
-            precursor_mzs.values, precursor_mzs.index.values, batch_start,
-            batch_stop, precursor_tol_mass, precursor_tol_mode,
-            nn_dists, nn_idx_ann, num_neighbors, distances, indices,
-            indptr)
-    index.reset()
-
-
-def _load_ann_index(index_filename: str, num_probe: int) -> faiss.Index:
-    """
-    Load the ANN index from the given file.
-
-    Parameters
-    ----------
-    index_filename : str
-        The ANN index filename.
-    num_probe : int
-        The number of cells to consider during searching.
-
-    Returns
-    -------
-    faiss.Index
-        The Faiss `Index`.
-    """
-    index = faiss.read_index(index_filename)
-    # IndexIVF has a `nprobe` hyperparameter, flat indexes don't.
-    if hasattr(index, 'nprobe'):
-        index.nprobe = min(math.ceil(index.nlist / 2), num_probe)
-    return index
-
-
-@nb.njit
-def _get_precursor_mz_interval_ids(precursor_mzs: np.ndarray, start_mz: float,
-                                   mz_window: float,
-                                   precursor_tol_mode: Optional[str],
-                                   precursor_tol_mass: float) -> \
-        Tuple[int, int]:
-    """
-    Get the IDs of the embeddings falling within the specified precursor m/z
-    interval (taking a small margin for overlapping intervals into account).
-
-    Parameters
-    ----------
-    precursor_mzs : np.ndarray
-        Array of sorted precursor m/z's.
-    start_mz : float
-        The lower end of the m/z interval.
-    mz_window : float
-        The width of the m/z interval.
-    precursor_tol_mode : Optional[str]
-        The unit of the precursor m/z tolerance ('Da' or 'ppm').
-    precursor_tol_mass : float
-        The value of the precursor m/z tolerance.
-
-    Returns
-    -------
-    Tuple[int, int]
-        The start and stop index of the embedding identifiers falling within
-        the specified precursor m/z interval.
-    """
-    if precursor_tol_mode == 'Da':
-        margin = precursor_tol_mass
-    elif precursor_tol_mode == 'ppm':
-        margin = precursor_tol_mass * start_mz / 10**6
-    else:
-        margin = 0
-    if margin > 0:
-        margin = max(margin, mz_window / 100)
-    idx = np.searchsorted(precursor_mzs, [start_mz - margin,
-                                          start_mz + mz_window + margin])
-    return idx[0], idx[1]
-
-
-@nb.njit
-def _filter_neighbors_mz(
-        precursor_mzs: np.ndarray, idx: np.ndarray, batch_start: int,
-        batch_stop: int, precursor_tol_mass: float, precursor_tol_mode: str,
-        nn_dists: np.ndarray, nn_idx_ann: np.ndarray,
-        num_neighbors: int, distances: np.ndarray, indices: np.ndarray,
-        indptr: np.ndarray) -> None:
-    """
-    Filter ANN neighbor indexes by precursor m/z tolerances and assign
-    pairwise distances.
-
-    Parameters
-    ----------
-    precursor_mzs : np.ndarray
-        Precursor m/z's corresponding to the embeddings.
-    idx : np.ndarray
-        The indexes corresponding to the embeddings.
-    batch_start, batch_stop : int
-        The indexes in the precursor m/z's of the current batch.
-    precursor_tol_mass : float
-        The precursor tolerance mass for embeddings to be considered as
-        neighbors.
-    precursor_tol_mode : str
-        The unit of the precursor m/z tolerance ('Da' or 'ppm').
-    nn_dists : np.ndarray
-        Distances of the nearest neighbors.
-    nn_idx_ann : np.ndarray
-        Indexes of the nearest neighbors.
-    num_neighbors : int
-        The (maximum) number of neighbors to set for each embedding.
-    distances : np.ndarray
-        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
-    indices : np.ndarray
-        The column indices for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    indptr : np.ndarray
-        The index pointers for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    """
-    nn_idx_mz = _get_neighbors_idx(
-        precursor_mzs, idx, batch_start, batch_stop, precursor_tol_mass,
-        precursor_tol_mode)
-    for i, idx_ann, idx_mz, dists in zip(
-            idx[batch_start:batch_stop], nn_idx_ann, nn_idx_mz, nn_dists):
-        mask = _intersect_idx_ann_mz(idx_ann, idx_mz, num_neighbors)
-        indptr[i + 1] = indptr[i] + len(mask)
-        distances[indptr[i]:indptr[i + 1]] = dists[mask]
-        indices[indptr[i]:indptr[i + 1]] = idx_ann[mask]
-
-
-@nb.njit
-def _get_neighbors_idx(mzs: np.ndarray, idx: np.ndarray, start_i: int,
-                       stop_i: int, precursor_tol_mass: float,
-                       precursor_tol_mode: str) -> List[np.ndarray]:
-    """
-    Filter nearest neighbor candidates on precursor m/z.
-
-    Parameters
-    ----------
-    mzs : np.ndarray
-        The precursor m/z's of the nearest neighbor candidates.
-    idx : np.ndarray
-        The indexes of the nearest neighbor candidates.
-    start_i, stop_i : int
-        Indexes used to slice the values to be considered in the batch
-        (inclusive start_i, exclusive stop_i).
-    precursor_tol_mass : float
-        The tolerance for vectors to be considered as neighbors.
-    precursor_tol_mode : str
-        The unit of the tolerance ('Da' or 'ppm').
-
-    Returns
-    -------
-    List[np.ndarray]
-        A list of sorted NumPy arrays with the indexes of the nearest neighbor
-        candidates for each item.
-    """
-    batch_mzs = mzs[start_i:stop_i]
-    if precursor_tol_mode == 'Da':
-        min_mz = batch_mzs[0] - precursor_tol_mass
-        max_mz = batch_mzs[-1] + precursor_tol_mass
-    elif precursor_tol_mode == 'ppm':
-        min_mz = batch_mzs[0] - batch_mzs[0] * precursor_tol_mass / 10**6
-        max_mz = batch_mzs[-1] + batch_mzs[-1] * precursor_tol_mass / 10**6
-    else:
-        raise ValueError('Unknown precursor tolerance filter')
-    batch_mzs = batch_mzs.reshape((-1, 1))
-    match_i = np.searchsorted(mzs, [min_mz, max_mz])
-    match_mzs = mzs[match_i[0]:match_i[1]].reshape((1, -1))
-    if precursor_tol_mode == 'Da':
-        masks = np.abs(batch_mzs - match_mzs) < precursor_tol_mass
-    elif precursor_tol_mode == 'ppm':
-        masks = (np.abs(batch_mzs - match_mzs) / match_mzs * 10**6
-                 < precursor_tol_mass)
-    match_idx = idx[match_i[0]:match_i[1]]
-    # noinspection PyUnboundLocalVariable
-    return [np.sort(match_idx[mask]) for mask in masks]
-
-
-@nb.njit
-def _intersect_idx_ann_mz(idx_ann: np.ndarray, idx_mz: np.ndarray,
-                          max_neighbors: int) -> np.ndarray:
-    """
-    Find the intersection between identifiers from ANN filtering and precursor
-    m/z filtering.
-
-    Parameters
-    ----------
-    idx_ann : np.ndarray
-        Identifiers from ANN filtering.
-    idx_mz : np.ndarray
-        SORTED identifiers from precursor m/z filtering.
-    max_neighbors : int
-        The maximum number of best matching neighbors to retain.
-
-    Returns
-    -------
-    np.ndarray
-        A mask to select the joint identifiers in the `idx_ann` array.
-    """
-    i_mz, idx_ann_order, idx = 0, np.argsort(idx_ann), []
-    for i_order, i_ann in enumerate(idx_ann_order):
-        if idx_ann[i_ann] != -1:
-            while i_mz < len(idx_mz) and idx_mz[i_mz] < idx_ann[i_ann]:
-                i_mz += 1
-            if i_mz == len(idx_mz):
-                break
-            if idx_ann[i_ann] == idx_mz[i_mz]:
-                idx.append(idx_ann_order[i_order])
-                i_mz += 1
-    idx = np.asarray(idx)
-    return (idx if max_neighbors >= len(idx)
-            else np.partition(idx, max_neighbors)[:max_neighbors])
-
-
-def cluster(distances_filename: str, metadata_filename: str,
-            clusters_filename: str, eps: float, min_samples: int,
-            precursor_tol_mass: float, precursor_tol_mode: str) -> None:
-    """
-    DBSCAN clustering of the embeddings based on a pairwise distance matrix.
-
-    Parameters
-    ----------
-    distances_filename : str
-        Precomputed pairwise distance matrix file to use for the DBSCAN
-        clustering.
+        NumPy file containing the embedding vectors to cluster.
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
     clusters_filename : str
-        File name to export the clustering results. Must have the ".npy"
-        extension.
-    eps : float
-        The eps DBSCAN parameter.
-    min_samples : int
-        The min_samples DBSCAN parameter.
+        File name to export the cluster labels.
     precursor_tol_mass : float
         The value of the precursor m/z tolerance.
-    precursor_tol_mode : Optional[str]
+    precursor_tol_mode : str
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    linkage : str
+        Linkage method to calculate the cluster distances. See
+        `scipy.cluster.hierarchy.linkage` for possible options.
+    distance_threshold : float
+        The maximum linkage distance threshold during clustering.
+    charges : Optional[Tuple[int]]
+        Optional tuple of minimum and maximum precursor charge (both inclusive)
+        to include, spectra with other precursor charges will be omitted.
     """
     if os.path.isfile(clusters_filename):
         warnings.warn('The clustering results file already exists and was '
                       'not recomputed')
         return
-
-    # DBSCAN clustering of the embeddings.
-    logger.info('DBSCAN clustering (eps=%.4f, min_samples=%d) of precomputed '
-                'pairwise distance matrix %s', eps, min_samples,
-                distances_filename)
-    # Reimplement DBSCAN preprocessing to avoid unnecessary memory consumption.
-    dist = ss.load_npz(distances_filename)
-    dist_data, dist_indices, dist_indptr = dist.data, dist.indices, dist.indptr
-    num_embeddings = dist.shape[0]
-    # Find the eps-neighborhoods for all points.
-    logger.debug('Find the eps-neighborhoods for all points (eps=%.4f)',
-                 eps)
-    mask = dist_data <= eps
-    # noinspection PyTypeChecker
-    indptr = _cumsum(mask)[dist_indptr]
-    indices = dist_indices[mask].astype(np.intp, copy=False)
-    neighborhoods = np.split(indices, indptr[1:-1])
-    # Initially, all samples are noise.
-    # (Memmap for shared memory multiprocessing.)
+    clusters_dir = os.path.dirname(clusters_filename)
+    if not os.path.exists(clusters_dir):
+        os.mkdir(clusters_dir)
+    # Sort the metadata by increasing precursor m/z for easy subsetting.
+    metadata = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])
+                .reset_index().sort_values(['charge', 'mz']))
+    metadata = metadata[metadata['charge'].isin(
+        np.arange(charges[0], charges[1] + 1))]
+    embeddings = np.load(embeddings_filename, mmap_mode='r')
+    # Cluster per contiguous block of precursor m/z's (relative to the
+    # precursor m/z threshold).
+    logging.info('Cluster %d embeddings using %s linkage and distance '
+                 'threshold %.3f', len(metadata), linkage, distance_threshold)
+    # Initially, all samples are noise. (Memmap for memory efficiency.)
     # noinspection PyUnresolvedReferences
     cluster_labels = np.lib.format.open_memmap(
-        clusters_filename, mode='w+', dtype=np.intp,
-        shape=(num_embeddings,))
+        clusters_filename, mode='w+', dtype=np.int64,
+        shape=(embeddings.shape[0],))
     cluster_labels.fill(-1)
-    # A list of all core samples found.
-    n_neighbors = np.fromiter(map(len, neighborhoods), np.uint32)
-    core_samples = n_neighbors >= min_samples
-    # Run Scikit-Learn DBSCAN.
-    logger.debug('Run Scikit-Learn DBSCAN inner.')
-    neighborhoods_arr = np.empty(len(neighborhoods), dtype=np.object)
-    neighborhoods_arr[:] = neighborhoods
-    dbscan_inner(core_samples, neighborhoods_arr, cluster_labels)
-
-    # Free up memory by deleting DBSCAN-related data structures.
-    del dist, dist_data, dist_indices, dist_indptr, mask, indptr, indices
-    del neighborhoods, n_neighbors, core_samples, neighborhoods_arr
-    gc.collect()
-
-    # Refine initial clusters to make sure spectra within a cluster don't have
-    # an excessive precursor m/z difference.
-    precursor_mzs = (pd.read_parquet(metadata_filename, columns=['mz'])
-                     .squeeze().values.astype(np.float32))
-    logger.debug('Sort cluster labels in ascending order.')
-    order = np.argsort(cluster_labels)
-    reverse_order = np.argsort(order)
-    cluster_labels[:] = cluster_labels[order]
-    precursor_mzs = precursor_mzs[order]
-    logger.debug('Finetune %d initial cluster assignments to not exceed %d %s '
-                 'precursor m/z tolerance', cluster_labels[-1] + 1,
-                 precursor_tol_mass, precursor_tol_mode)
-    if cluster_labels[-1] == -1:     # Only noise samples.
-        cluster_labels.fill(-1)
-    else:
-        group_idx = nb.typed.List(_get_cluster_group_idx(cluster_labels))
-        n_clusters = nb.typed.List(joblib.Parallel(n_jobs=-1)(
-            joblib.delayed(_postprocess_cluster)
-            (cluster_labels[start_i:stop_i], precursor_mzs[start_i:stop_i],
-             precursor_tol_mass, precursor_tol_mode,
-             min_samples) for start_i, stop_i in group_idx))
-        _assign_unique_cluster_labels(cluster_labels, group_idx,
-                                      n_clusters, min_samples)
-        cluster_labels[:] = cluster_labels[reverse_order]
+    max_label = 0
+    with tqdm.tqdm(total=len(metadata), desc='Clustering', unit='embedding',
+                   smoothing=0) as pbar:
+        for _, metadata_charge in metadata.groupby('charge'):
+            splits = _get_precursor_mz_splits(metadata_charge['mz'].values,
+                                              precursor_tol_mass,
+                                              precursor_tol_mode)
+            for idx, labels, mask in joblib.Parallel(
+                    n_jobs=-1, backend='threading')(
+                    joblib.delayed(_cluster_interval)
+                    (embeddings,
+                     metadata_charge['index'].values[splits[i]:splits[i+1]],
+                     metadata_charge['mz'].values[splits[i]:splits[i+1]],
+                     linkage, distance_threshold, precursor_tol_mass,
+                     precursor_tol_mode) for i in range(len(splits) - 1)):
+                if mask is not None:
+                    cluster_labels[idx[mask]] = max_label + labels[mask]
+                    max_label += labels[mask].max() + 1
+                pbar.update(len(idx))
     cluster_labels.flush()
-    logger.debug('%d unique clusters after precursor m/z finetuning',
-                 np.amax(cluster_labels) + 1)
+    logger.info('%d embeddings grouped in %d clusters',
+                (cluster_labels != -1).sum(), max_label)
 
 
 @nb.njit
-def _cumsum(a: np.ndarray) -> np.ndarray:
+def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
+                             precursor_tol_mass: float,
+                             precursor_tol_mode: str) -> List[int]:
     """
-    Cumulative sum of the elements.
-
-    Try to avoid inadvertent copies in `np.cumsum`.
+    Find contiguous blocks of precursor m/z's, relative to the precursor m/z
+    tolerance.
 
     Parameters
     ----------
-    a : np.ndarray
-        Input array
+    precursor_mzs : np.ndarray
+        The sorted precursor m/z's.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
 
     Returns
     -------
-    np.ndarray
-        The cumulative sum in an array of size len(a) + 1 (first element is 0).
+    List[int]
+        A list of start and end indices of blocks of precursor m/z's that do
+        not exceed the precursor m/z tolerance and are separated by at least
+        the precursor m/z tolerance.
     """
-    out = np.zeros(len(a) + 1, dtype=np.int64)
-    for i in range(len(out) - 1):
-        out[i + 1] = out[i] + a[i]
-    return out
+    splits, i = [0], 1
+    for i in range(1, len(precursor_mzs)):
+        if suu.mass_diff(precursor_mzs[i], precursor_mzs[i - 1],
+                         precursor_tol_mode == 'Da') > precursor_tol_mass:
+            splits.append(i)
+    splits.append(len(precursor_mzs))
+    return splits
 
 
-@nb.njit
+@nb.njit(boundscheck=False)
+def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
+                      linkage: str, distance_threshold: float,
+                      precursor_tol_mass: float, precursor_tol_mode: str) \
+        -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+    """
+    Cluster the embeddings in the given interval.
+
+    Parameters
+    ----------
+    embeddings : np.ndarray
+        _All_ embeddings.
+    idx : np.ndarray
+        The indexes of the embeddings in the current interval.
+    mzs : np.ndarray
+        The precursor m/z's corresponding to the current interval indexes.
+    linkage : str
+        Linkage method to calculate the cluster distances. See
+        `scipy.cluster.hierarchy.linkage` for possible options.
+    distance_threshold : float
+        The maximum linkage distance threshold during clustering.
+    precursor_tol_mass : float
+        The value of the precursor m/z tolerance.
+    precursor_tol_mode : str
+        The unit of the precursor m/z tolerance ('Da' or 'ppm').
+
+    Returns
+    -------
+    Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]
+        The indexes, cluster labels, and index mask of the clustered
+        embeddings. Cluster labels are 0-based, with noise points -1.
+        If there are no clustered embeddings in the current interval, `None`
+        is returned.
+    """
+    if len(idx) > 1:
+        # Hierarchical clustering of the embeddings.
+        # Subtract 1 because fcluster starts with cluster label 1 instead of 0
+        # (like Scikit-Learn does).
+        pdist_euclidean = np.empty(len(idx) * (len(idx) - 1) // 2, np.float64)
+        link_arr = np.empty((len(idx) - 1, 4), dtype=np.float64)
+        with nb.objmode(labels='int32[:]'):
+            pdist(embeddings[idx], 'euclidean', out=pdist_euclidean)
+            fastcluster.linkage_wrap(len(idx), pdist_euclidean, link_arr,
+                                     fastcluster.mthidx[linkage])
+            labels = fcluster(link_arr, distance_threshold, 'distance') - 1
+        # Refine initial clusters to make sure spectra within a cluster don't
+        # have an excessive precursor m/z difference.
+        order = np.argsort(labels)
+        idx, mzs, labels = idx[order], mzs[order], labels[order]
+        current_label = 0
+        for start_i, stop_i in _get_cluster_group_idx(labels):
+            n_clusters = _postprocess_cluster(
+                labels[start_i:stop_i], mzs[start_i:stop_i],
+                precursor_tol_mass, precursor_tol_mode, 2, current_label)
+            current_label += n_clusters
+        mask = labels != -1
+        return idx, labels, mask if mask.any() else None
+    else:
+        return idx, None, None
+
+
+@nb.njit(boundscheck=False)
 def _get_cluster_group_idx(clusters: np.ndarray) -> Iterator[Tuple[int, int]]:
     """
     Get start and stop indexes for unique cluster labels.
@@ -701,13 +214,14 @@ def _get_cluster_group_idx(clusters: np.ndarray) -> Iterator[Tuple[int, int]]:
         yield start_i, stop_i
 
 
+@nb.njit(boundscheck=False)
 def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
                          precursor_tol_mass: float, precursor_tol_mode: str,
-                         min_samples: int) -> int:
+                         min_samples: int, start_label: int) -> int:
     """
-    Agglomerative clustering of the precursor m/z's within each initial
-    cluster to avoid that spectra within a cluster have an excessive precursor
-    m/z difference.
+    Partitioning based on the precursor m/z's within each initial cluster to
+    avoid that spectra within a cluster have an excessive precursor m/z
+    difference.
 
     Parameters
     ----------
@@ -727,48 +241,53 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
     int
         The number of clusters after splitting on precursor m/z.
     """
-    cluster_labels.fill(-1)
     # No splitting needed if there are too few items in cluster.
-    # This seems to happen sometimes despite that DBSCAN requires a higher
-    # `min_samples`.
     if cluster_labels.shape[0] < min_samples:
-        n_clusters = 0
+        cluster_labels.fill(-1)
+        return 0
     else:
         # Group items within the cluster based on their precursor m/z.
         # Precursor m/z's within a single group can't exceed the specified
         # precursor m/z tolerance (`distance_threshold`).
         # Subtract 1 because fcluster starts with cluster label 1 instead of 0
         # (like Scikit-Learn does).
-        cluster_assignments = fcluster(
-            _linkage(cluster_mzs, precursor_tol_mode),
-            precursor_tol_mass, 'distance') - 1
+        linkage = _linkage(cluster_mzs, precursor_tol_mode)
+        with nb.objmode(cluster_assignments='int32[:]'):
+            cluster_assignments = fcluster(
+                linkage, precursor_tol_mass, 'distance') - 1
         n_clusters = cluster_assignments.max() + 1
         # Update cluster assignments.
         if n_clusters == 1:
             # Single homogeneous cluster.
-            cluster_labels.fill(0)
+            cluster_labels.fill(start_label)
         elif n_clusters == cluster_mzs.shape[0]:
             # Only singletons.
+            cluster_labels.fill(-1)
             n_clusters = 0
         else:
-            unique, inverse, counts = np.unique(
-                cluster_assignments, return_inverse=True, return_counts=True)
-            non_noise_clusters = np.where(counts >= min_samples)[0]
-            labels = -np.ones_like(unique)
-            labels[non_noise_clusters] = np.unique(unique[non_noise_clusters],
-                                                   return_inverse=True)[1]
-            cluster_labels[:] = labels[inverse]
-            n_clusters = len(non_noise_clusters)
-    return n_clusters
+            labels = nb.typed.Dict.empty(key_type=nb.int64,
+                                         value_type=nb.int64)
+            for i, label in enumerate(cluster_assignments):
+                labels[label] = labels.get(label, 0) + 1
+            n_clusters = 0
+            for label, count in labels.items():
+                if count < min_samples:
+                    labels[label] = -1
+                else:
+                    labels[label] = start_label + n_clusters
+                    n_clusters += 1
+            for i, label in enumerate(cluster_assignments):
+                cluster_labels[i] = labels[label]
+        return n_clusters
 
 
-@nb.njit
+@nb.njit(fastmath=True, boundscheck=False)
 def _linkage(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
     """
-    Perform hierarchical clustering of a one-dimensional m/z array.
+    Linkage of a one-dimensional precursor m/z array.
 
-    Because the data is one-dimensional, no paiwise distance matrix needs to be
-    computed, but rather sorting can be used.
+    Because the data is one-dimensional, no pairwise distance matrix needs to
+    be computed, but rather sorting can be used.
 
     For information on the linkage output format, see:
     https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html
@@ -805,37 +324,6 @@ def _linkage(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
     return linkage
 
 
-@nb.njit
-def _assign_unique_cluster_labels(cluster_labels: np.ndarray,
-                                  group_idx: nb.typed.List,
-                                  n_clusters: nb.typed.List,
-                                  min_samples: int) -> None:
-    """
-    Make sure all cluster labels are unique after potential splitting of
-    clusters to avoid excessive precursor m/z differences.
-
-    Parameters
-    ----------
-    cluster_labels : np.ndarray
-        Cluster labels per cluster grouping.
-    group_idx : nb.typed.List[Tuple[int, int]]
-        Tuples with the start index (inclusive) and end index (exclusive) of
-        the cluster groupings.
-    n_clusters: nb.typed.List[int]
-        The number of clusters per cluster grouping.
-    min_samples : int
-        The minimum number of samples in a cluster.
-    """
-    current_label = 0
-    for (start_i, stop_i), n_cluster in zip(group_idx, n_clusters):
-        if n_cluster > 0 and stop_i - start_i >= min_samples:
-            current_labels = cluster_labels[start_i:stop_i]
-            current_labels[current_labels != -1] += current_label
-            current_label += n_cluster
-        else:
-            cluster_labels[start_i:stop_i].fill(-1)
-
-
 def get_cluster_medoids(clusters_filename: str, distances_filename: str):
     """
     Get indexes of the cluster representative spectra (medoids).
@@ -860,7 +348,7 @@ def get_cluster_medoids(clusters_filename: str, distances_filename: str):
         pairwise_dist_matrix.indices, pairwise_dist_matrix.data)
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, boundscheck=False)
 def _get_cluster_medoids(clusters: np.ndarray,
                          pairwise_indptr: np.ndarray,
                          pairwise_indices: np.ndarray,
@@ -910,7 +398,7 @@ def _get_cluster_medoids(clusters: np.ndarray,
     return representatives
 
 
-@nb.njit(fastmath=True)
+@nb.njit(fastmath=True, boundscheck=False)
 def _get_cluster_medoid_index(cluster_mask: np.ndarray,
                               pairwise_indptr: np.ndarray,
                               pairwise_indices: np.ndarray,
