@@ -2,6 +2,7 @@ name: gleams
 channels:
   - defaults
   - conda-forge
+  - intel
 dependencies:
   - binutils_linux-64=2.36
   - cudnn=7.6.5
@@ -9,6 +10,10 @@ dependencies:
   - gcc_linux-64=11.2.0
   - git-lfs=3.0.2
   - gxx_linux-64=11.2.0
+  - icc_rt=2021.4.0
   - libiconv=1.16
+  - mkl=2021.4.0
+  - numpy=1.18.5
   - python=3.8
+  - scipy==1.7.1
 prefix: $HOME/.conda/envs/gleams
