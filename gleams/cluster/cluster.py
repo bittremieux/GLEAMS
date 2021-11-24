@@ -1,7 +1,9 @@
+import gc
 import logging
+import math
 import os
 import warnings
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, Optional, Tuple
 
 import fastcluster
 import joblib
@@ -82,10 +84,9 @@ def cluster(embeddings_filename: str, metadata_filename: str,
                 joblib.delayed(_cluster_interval)
                 (embeddings, idx, mz, cluster_labels, splits[i], splits[i+1],
                  linkage, distance_threshold, precursor_tol_mass,
-                 precursor_tol_mode) for i in range(len(splits) - 1))
+                 precursor_tol_mode, pbar) for i in range(len(splits) - 1))
             max_label = _assign_global_cluster_labels(
                 cluster_labels, idx, splits, max_label) + 1
-            pbar.update(len(idx))
     cluster_labels.flush()
     logger.info('%d embeddings grouped in %d clusters',
                 (cluster_labels != -1).sum(), max_label)
@@ -124,12 +125,11 @@ def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
     return splits
 
 
-@nb.njit(boundscheck=False)
 def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
-                      cluster_labels: np.ndarray, start_i, stop_i,
-                      linkage: str, distance_threshold: float,
-                      precursor_tol_mass: float, precursor_tol_mode: str) \
-        -> None:
+                      cluster_labels: np.ndarray, interval_start: int,
+                      interval_stop: int, linkage: str,
+                      distance_threshold: float, precursor_tol_mass: float,
+                      precursor_tol_mode: str, pbar: tqdm.tqdm) -> None:
     """
     Cluster the embeddings in the given interval.
 
@@ -143,9 +143,9 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         The precursor m/z's corresponding to the current interval indexes.
     cluster_labels : np.ndarray
         Array in which to fill the cluster label assignments.
-    start_i : int
+    interval_start : int
         The current interval start index.
-    stop_i : int
+    interval_stop : int
         The current interval stop index.
     linkage : str
         Linkage method to calculate the cluster distances. See
@@ -156,32 +156,47 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         The value of the precursor m/z tolerance.
     precursor_tol_mode : str
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    pbar : tqdm.tqdm
+        Tqdm progress bar.
     """
-    if stop_i - start_i > 1:
-        idx, mzs = idx[start_i:stop_i], mzs[start_i:stop_i]
-        embeddings = embeddings[idx]
-        # Hierarchical clustering of the embeddings.
-        # Subtract 1 because fcluster starts with cluster label 1 instead of 0
-        # (like Scikit-Learn does).
-        pdist_euclidean = np.empty(len(idx) * (len(idx) - 1) // 2, np.float64)
-        link_arr = np.empty((len(idx) - 1, 4), dtype=np.float64)
-        with nb.objmode(labels='int32[:]'):
-            pdist(embeddings, 'euclidean', out=pdist_euclidean)
-            fastcluster.linkage_wrap(len(idx), pdist_euclidean, link_arr,
+    masks = np.arange(interval_start, interval_stop)
+    np.random.shuffle(masks)
+    masks = np.array_split(
+        masks, math.ceil((interval_stop - interval_start) / 2 ** 15))
+    for mask in masks:
+        if len(mask) > 1:
+            idx_interval, mzs_interval = idx[mask], mzs[mask]
+            embeddings_interval = embeddings[idx_interval]
+            # Hierarchical clustering of the embeddings.
+            # Subtract 1 because fcluster starts with cluster label 1 instead
+            # of 0 (like Scikit-Learn does).
+            # with nb.objmode(labels='int32[:]'):
+            pdist_euclidean = np.empty(len(mask) * (len(mask) - 1) // 2,
+                                       np.float64)
+            pdist(embeddings_interval, 'euclidean', out=pdist_euclidean)
+            link_arr = np.empty((len(mask) - 1, 4), dtype=np.float64)
+            fastcluster.linkage_wrap(len(mask), pdist_euclidean, link_arr,
                                      fastcluster.mthidx[linkage])
+            del pdist_euclidean
             labels = fcluster(link_arr, distance_threshold, 'distance') - 1
-        # Refine initial clusters to make sure spectra within a cluster don't
-        # have an excessive precursor m/z difference.
-        order = np.argsort(labels)
-        idx, mzs, labels = idx[order], mzs[order], labels[order]
-        current_label = 0
-        for start_i, stop_i in _get_cluster_group_idx(labels):
-            n_clusters = _postprocess_cluster(
-                labels[start_i:stop_i], mzs[start_i:stop_i],
-                precursor_tol_mass, precursor_tol_mode, 2, current_label)
-            current_label += n_clusters
-        # Assign cluster labels.
-        cluster_labels[idx] = labels
+            del link_arr
+            if len(mask) > 2**10:
+                gc.collect()
+            # Refine initial clusters to make sure spectra within a cluster
+            # don't have an excessive precursor m/z difference.
+            order = np.argsort(labels)
+            idx_interval = idx_interval[order]
+            mzs_interval = mzs_interval[order]
+            labels = labels[order]
+            current_label = 0
+            for start_i, stop_i in _get_cluster_group_idx(labels):
+                n_clusters = _postprocess_cluster(
+                    labels[start_i:stop_i], mzs_interval[start_i:stop_i],
+                    precursor_tol_mass, precursor_tol_mode, 2, current_label)
+                current_label += n_clusters
+            # Assign cluster labels.
+            cluster_labels[idx_interval] = labels
+    pbar.update(interval_stop - interval_start)
 
 
 @nb.njit(boundscheck=False)
