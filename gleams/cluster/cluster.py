@@ -66,28 +66,26 @@ def cluster(embeddings_filename: str, metadata_filename: str,
     # Initially, all samples are noise. (Memmap for memory efficiency.)
     # noinspection PyUnresolvedReferences
     cluster_labels = np.lib.format.open_memmap(
-        clusters_filename, mode='w+', dtype=np.int64,
+        clusters_filename, mode='w+', dtype=np.int32,
         shape=(embeddings.shape[0],))
     cluster_labels.fill(-1)
     max_label = 0
     with tqdm.tqdm(total=len(metadata), desc='Clustering', unit='embedding',
                    smoothing=0) as pbar:
         for _, metadata_charge in metadata.groupby('charge'):
-            splits = _get_precursor_mz_splits(metadata_charge['mz'].values,
-                                              precursor_tol_mass,
+            idx = metadata_charge['index'].values
+            mz = metadata_charge['mz'].values
+            splits = _get_precursor_mz_splits(mz, precursor_tol_mass,
                                               precursor_tol_mode)
-            for idx, labels, mask in joblib.Parallel(
-                    n_jobs=-1, backend='threading')(
-                    joblib.delayed(_cluster_interval)
-                    (embeddings,
-                     metadata_charge['index'].values[splits[i]:splits[i+1]],
-                     metadata_charge['mz'].values[splits[i]:splits[i+1]],
-                     linkage, distance_threshold, precursor_tol_mass,
-                     precursor_tol_mode) for i in range(len(splits) - 1)):
-                if mask is not None:
-                    cluster_labels[idx[mask]] = max_label + labels[mask]
-                    max_label += labels[mask].max() + 1
-                pbar.update(len(idx))
+            # Per-split cluster labels.
+            joblib.Parallel(n_jobs=-1, backend='threading')(
+                joblib.delayed(_cluster_interval)
+                (embeddings, idx, mz, cluster_labels, splits[i], splits[i+1],
+                 linkage, distance_threshold, precursor_tol_mass,
+                 precursor_tol_mode) for i in range(len(splits) - 1))
+            max_label = _assign_global_cluster_labels(
+                cluster_labels, idx, splits, max_label) + 1
+            pbar.update(len(idx))
     cluster_labels.flush()
     logger.info('%d embeddings grouped in %d clusters',
                 (cluster_labels != -1).sum(), max_label)
@@ -96,7 +94,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
 @nb.njit
 def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
                              precursor_tol_mass: float,
-                             precursor_tol_mode: str) -> List[int]:
+                             precursor_tol_mode: str) -> nb.typed.List:
     """
     Find contiguous blocks of precursor m/z's, relative to the precursor m/z
     tolerance.
@@ -112,12 +110,12 @@ def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
 
     Returns
     -------
-    List[int]
+    nb.typed.List[int]
         A list of start and end indices of blocks of precursor m/z's that do
         not exceed the precursor m/z tolerance and are separated by at least
         the precursor m/z tolerance.
     """
-    splits, i = [0], 1
+    splits, i = nb.typed.List([0]), 1
     for i in range(1, len(precursor_mzs)):
         if suu.mass_diff(precursor_mzs[i], precursor_mzs[i - 1],
                          precursor_tol_mode == 'Da') > precursor_tol_mass:
@@ -128,9 +126,10 @@ def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
 
 @nb.njit(boundscheck=False)
 def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
+                      cluster_labels: np.ndarray, start_i, stop_i,
                       linkage: str, distance_threshold: float,
                       precursor_tol_mass: float, precursor_tol_mode: str) \
-        -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+        -> None:
     """
     Cluster the embeddings in the given interval.
 
@@ -142,6 +141,12 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         The indexes of the embeddings in the current interval.
     mzs : np.ndarray
         The precursor m/z's corresponding to the current interval indexes.
+    cluster_labels : np.ndarray
+        Array in which to fill the cluster label assignments.
+    start_i : int
+        The current interval start index.
+    stop_i : int
+        The current interval stop index.
     linkage : str
         Linkage method to calculate the cluster distances. See
         `scipy.cluster.hierarchy.linkage` for possible options.
@@ -151,23 +156,17 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         The value of the precursor m/z tolerance.
     precursor_tol_mode : str
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
-
-    Returns
-    -------
-    Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]
-        The indexes, cluster labels, and index mask of the clustered
-        embeddings. Cluster labels are 0-based, with noise points -1.
-        If there are no clustered embeddings in the current interval, `None`
-        is returned.
     """
-    if len(idx) > 1:
+    if stop_i - start_i > 1:
+        idx, mzs = idx[start_i:stop_i], mzs[start_i:stop_i]
+        embeddings = embeddings[idx]
         # Hierarchical clustering of the embeddings.
         # Subtract 1 because fcluster starts with cluster label 1 instead of 0
         # (like Scikit-Learn does).
         pdist_euclidean = np.empty(len(idx) * (len(idx) - 1) // 2, np.float64)
         link_arr = np.empty((len(idx) - 1, 4), dtype=np.float64)
         with nb.objmode(labels='int32[:]'):
-            pdist(embeddings[idx], 'euclidean', out=pdist_euclidean)
+            pdist(embeddings, 'euclidean', out=pdist_euclidean)
             fastcluster.linkage_wrap(len(idx), pdist_euclidean, link_arr,
                                      fastcluster.mthidx[linkage])
             labels = fcluster(link_arr, distance_threshold, 'distance') - 1
@@ -181,10 +180,8 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
                 labels[start_i:stop_i], mzs[start_i:stop_i],
                 precursor_tol_mass, precursor_tol_mode, 2, current_label)
             current_label += n_clusters
-        mask = labels != -1
-        return idx, labels, mask if mask.any() else None
-    else:
-        return idx, None, None
+        # Assign cluster labels.
+        cluster_labels[idx] = labels
 
 
 @nb.njit(boundscheck=False)
@@ -322,6 +319,40 @@ def _linkage(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
         del clusters[min_i + 1]
 
     return linkage
+
+
+@nb.njit(fastmath=True, boundscheck=False)
+def _assign_global_cluster_labels(cluster_labels: np.ndarray, idx: np.ndarray,
+                                  splits: nb.typed.List, current_label: int) \
+        -> int:
+    """
+    Convert cluster labels per split to globally unique labels.
+
+    Parameters
+    ----------
+    cluster_labels : np.ndarray
+        The cluster labels.
+    idx : np.ndarray
+        The label indexes.
+    splits : nb.typed.List
+        A list of start and end indices of cluster chunks.
+    current_label : int
+        First cluster label.
+
+    Returns
+    -------
+    int
+        Last cluster label.
+    """
+    max_label = current_label
+    for i in range(len(splits) - 1):
+        for j in idx[splits[i]:splits[i+1]]:
+            if cluster_labels[j] != -1:
+                cluster_labels[j] += current_label
+                if cluster_labels[j] > max_label:
+                    max_label = cluster_labels[j]
+        current_label = max_label
+    return max_label
 
 
 def get_cluster_medoids(clusters_filename: str, distances_filename: str):
