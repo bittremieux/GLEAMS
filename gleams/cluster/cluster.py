@@ -78,7 +78,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
             idx = metadata_charge['index'].values
             mz = metadata_charge['mz'].values
             splits = _get_precursor_mz_splits(mz, precursor_tol_mass,
-                                              precursor_tol_mode)
+                                              precursor_tol_mode, 2**15)
             # Per-split cluster labels.
             joblib.Parallel(n_jobs=-1, backend='threading')(
                 joblib.delayed(_cluster_interval)
@@ -95,7 +95,8 @@ def cluster(embeddings_filename: str, metadata_filename: str,
 @nb.njit
 def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
                              precursor_tol_mass: float,
-                             precursor_tol_mode: str) -> nb.typed.List:
+                             precursor_tol_mode: str,
+                             batch_size: int) -> nb.typed.List:
     """
     Find contiguous blocks of precursor m/z's, relative to the precursor m/z
     tolerance.
@@ -108,6 +109,8 @@ def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
         The value of the precursor m/z tolerance.
     precursor_tol_mode : str
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
+    batch_size : int
+        Maximum interval size.
 
     Returns
     -------
@@ -120,7 +123,16 @@ def _get_precursor_mz_splits(precursor_mzs: np.ndarray,
     for i in range(1, len(precursor_mzs)):
         if suu.mass_diff(precursor_mzs[i], precursor_mzs[i - 1],
                          precursor_tol_mode == 'Da') > precursor_tol_mass:
-            splits.append(i)
+            block_size = i - splits[-1]
+            if block_size < batch_size:
+                splits.append(i)
+            else:
+                n_chunks = math.ceil(block_size / batch_size)
+                chunk_size = block_size // n_chunks
+                for _ in range(block_size % n_chunks):
+                    splits.append(splits[-1] + chunk_size + 1)
+                for _ in range(n_chunks - (block_size % n_chunks)):
+                    splits.append(splits[-1] + chunk_size)
     splits.append(len(precursor_mzs))
     return splits
 
@@ -159,44 +171,41 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
     pbar : tqdm.tqdm
         Tqdm progress bar.
     """
-    masks = np.arange(interval_start, interval_stop)
-    np.random.shuffle(masks)
-    masks = np.array_split(
-        masks, math.ceil((interval_stop - interval_start) / 2 ** 15))
-    for mask in masks:
-        if len(mask) > 1:
-            idx_interval, mzs_interval = idx[mask], mzs[mask]
-            embeddings_interval = embeddings[idx_interval]
-            # Hierarchical clustering of the embeddings.
-            # Subtract 1 because fcluster starts with cluster label 1 instead
-            # of 0 (like Scikit-Learn does).
-            # with nb.objmode(labels='int32[:]'):
-            pdist_euclidean = np.empty(len(mask) * (len(mask) - 1) // 2,
-                                       np.float64)
-            pdist(embeddings_interval, 'euclidean', out=pdist_euclidean)
-            link_arr = np.empty((len(mask) - 1, 4), dtype=np.float64)
-            fastcluster.linkage_wrap(len(mask), pdist_euclidean, link_arr,
-                                     fastcluster.mthidx[linkage])
-            del pdist_euclidean
-            labels = fcluster(link_arr, distance_threshold, 'distance') - 1
-            del link_arr
-            if len(mask) > 2**10:
-                gc.collect()
-            # Refine initial clusters to make sure spectra within a cluster
-            # don't have an excessive precursor m/z difference.
-            order = np.argsort(labels)
-            idx_interval = idx_interval[order]
-            mzs_interval = mzs_interval[order]
-            labels = labels[order]
-            current_label = 0
-            for start_i, stop_i in _get_cluster_group_idx(labels):
-                n_clusters = _postprocess_cluster(
-                    labels[start_i:stop_i], mzs_interval[start_i:stop_i],
-                    precursor_tol_mass, precursor_tol_mode, 2, current_label)
-                current_label += n_clusters
-            # Assign cluster labels.
-            cluster_labels[idx_interval] = labels
-    pbar.update(interval_stop - interval_start)
+    n_embeddings = interval_stop - interval_start
+    if n_embeddings > 1:
+        idx_interval = idx[interval_start:interval_stop]
+        mzs_interval = mzs[interval_start:interval_stop]
+        embeddings_interval = embeddings[idx_interval]
+        # Hierarchical clustering of the embeddings.
+        # Subtract 1 because fcluster starts with cluster label 1 instead
+        # of 0 (like Scikit-Learn does).
+        # with nb.objmode(labels='int32[:]'):
+        pdist_euclidean = np.empty(n_embeddings * (n_embeddings - 1) // 2,
+                                   np.float64)
+        pdist(embeddings_interval, 'euclidean', out=pdist_euclidean)
+        link_arr = np.empty((n_embeddings - 1, 4), dtype=np.float64)
+        fastcluster.linkage_wrap(n_embeddings, pdist_euclidean, link_arr,
+                                 fastcluster.mthidx[linkage])
+        del pdist_euclidean
+        labels = fcluster(link_arr, distance_threshold, 'distance') - 1
+        del link_arr
+        if n_embeddings > 2**12:
+            gc.collect()
+        # Refine initial clusters to make sure spectra within a cluster
+        # don't have an excessive precursor m/z difference.
+        order = np.argsort(labels)
+        idx_interval = idx_interval[order]
+        mzs_interval = mzs_interval[order]
+        labels = labels[order]
+        current_label = 0
+        for start_i, stop_i in _get_cluster_group_idx(labels):
+            n_clusters = _postprocess_cluster(
+                labels[start_i:stop_i], mzs_interval[start_i:stop_i],
+                precursor_tol_mass, precursor_tol_mode, 2, current_label)
+            current_label += n_clusters
+        # Assign cluster labels.
+        cluster_labels[idx_interval] = labels
+    pbar.update(n_embeddings)
 
 
 @nb.njit(boundscheck=False)
