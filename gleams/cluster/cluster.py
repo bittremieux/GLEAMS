@@ -89,7 +89,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
                 if interval_medoids is not None:
                     medoids.append(interval_medoids)
             max_label = _assign_global_cluster_labels(
-                cluster_labels, idx, splits, max_label) + 1
+                cluster_labels, idx, splits, max_label)
     cluster_labels.flush()
     np.save(clusters_filename.replace('.npy', '_medoids.npy'),
             np.hstack(medoids))
@@ -431,5 +431,5 @@ def _assign_global_cluster_labels(cluster_labels: np.ndarray, idx: np.ndarray,
                 cluster_labels[j] += current_label
                 if cluster_labels[j] > max_label:
                     max_label = cluster_labels[j]
-        current_label = max_label
+        current_label = max_label + 1
     return max_label
