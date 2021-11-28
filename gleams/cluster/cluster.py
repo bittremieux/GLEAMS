@@ -3,18 +3,17 @@ import logging
 import math
 import os
 import warnings
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import fastcluster
 import joblib
 import numba as nb
 import numpy as np
 import pandas as pd
-import scipy.sparse as ss
+import scipy.cluster.hierarchy as sch
+import scipy.spatial.distance as ssd
 import spectrum_utils.utils as suu
 import tqdm
-from scipy.cluster.hierarchy import fcluster
-from scipy.spatial.distance import pdist
 
 
 logger = logging.getLogger('gleams')
@@ -34,7 +33,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
     metadata_filename : str
         Metadata file with precursor m/z information for all embeddings.
     clusters_filename : str
-        File name to export the cluster labels.
+        File name to export the cluster labels. Must have a ".npy" extension.
     precursor_tol_mass : float
         The value of the precursor m/z tolerance.
     precursor_tol_mode : str
@@ -71,7 +70,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
         clusters_filename, mode='w+', dtype=np.int32,
         shape=(embeddings.shape[0],))
     cluster_labels.fill(-1)
-    max_label = 0
+    max_label, medoids = 0, []
     with tqdm.tqdm(total=len(metadata), desc='Clustering', unit='embedding',
                    smoothing=0) as pbar:
         for _, metadata_charge in metadata.groupby('charge'):
@@ -80,14 +79,20 @@ def cluster(embeddings_filename: str, metadata_filename: str,
             splits = _get_precursor_mz_splits(mz, precursor_tol_mass,
                                               precursor_tol_mode, 2**15)
             # Per-split cluster labels.
-            joblib.Parallel(n_jobs=-1, backend='threading')(
+            for interval_medoids in joblib.Parallel(
+                    n_jobs=-1, backend='threading')(
                 joblib.delayed(_cluster_interval)
-                (embeddings, idx, mz, cluster_labels, splits[i], splits[i+1],
-                 linkage, distance_threshold, precursor_tol_mass,
-                 precursor_tol_mode, pbar) for i in range(len(splits) - 1))
+                    (embeddings, idx, mz, cluster_labels, splits[i],
+                     splits[i+1], linkage, distance_threshold,
+                     precursor_tol_mass, precursor_tol_mode, pbar)
+                    for i in range(len(splits) - 1)):
+                if interval_medoids is not None:
+                    medoids.append(interval_medoids)
             max_label = _assign_global_cluster_labels(
                 cluster_labels, idx, splits, max_label) + 1
     cluster_labels.flush()
+    np.save(clusters_filename.replace('.npy', '_medoids.npy'),
+            np.hstack(medoids))
     logger.info('%d embeddings grouped in %d clusters',
                 (cluster_labels != -1).sum(), max_label)
 
@@ -141,7 +146,8 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
                       cluster_labels: np.ndarray, interval_start: int,
                       interval_stop: int, linkage: str,
                       distance_threshold: float, precursor_tol_mass: float,
-                      precursor_tol_mode: str, pbar: tqdm.tqdm) -> None:
+                      precursor_tol_mode: str, pbar: tqdm.tqdm) \
+        -> Optional[np.ndarray]:
     """
     Cluster the embeddings in the given interval.
 
@@ -170,6 +176,11 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         The unit of the precursor m/z tolerance ('Da' or 'ppm').
     pbar : tqdm.tqdm
         Tqdm progress bar.
+
+    Returns
+    -------
+    Optional[np.ndarray]
+        List with indexes of the medoids for each cluster.
     """
     n_embeddings = interval_stop - interval_start
     if n_embeddings > 1:
@@ -177,27 +188,17 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
         mzs_interval = mzs[interval_start:interval_stop]
         embeddings_interval = embeddings[idx_interval]
         # Hierarchical clustering of the embeddings.
-        # Subtract 1 because fcluster starts with cluster label 1 instead
-        # of 0 (like Scikit-Learn does).
-        # with nb.objmode(labels='int32[:]'):
-        pdist_euclidean = np.empty(n_embeddings * (n_embeddings - 1) // 2,
-                                   np.float64)
-        pdist(embeddings_interval, 'euclidean', out=pdist_euclidean)
-        link_arr = np.empty((n_embeddings - 1, 4), dtype=np.float64)
-        fastcluster.linkage_wrap(n_embeddings, pdist_euclidean, link_arr,
-                                 fastcluster.mthidx[linkage])
-        del pdist_euclidean
-        labels = fcluster(link_arr, distance_threshold, 'distance') - 1
-        del link_arr
-        if n_embeddings > 2**12:
-            gc.collect()
-        # Refine initial clusters to make sure spectra within a cluster
-        # don't have an excessive precursor m/z difference.
+        # Subtract 1 because fcluster starts with cluster label 1 instead of 0
+        # (like Scikit-Learn does).
+        pdist = np.empty(n_embeddings * (n_embeddings - 1) // 2, np.float64)
+        ssd.pdist(embeddings_interval, 'euclidean', out=pdist)
+        labels = sch.fcluster(fastcluster.linkage(pdist, linkage),
+                              distance_threshold, 'distance') - 1
+        # Refine initial clusters to make sure spectra within a cluster don't
+        # have an excessive precursor m/z difference.
         order = np.argsort(labels)
-        idx_interval = idx_interval[order]
-        mzs_interval = mzs_interval[order]
-        labels = labels[order]
-        current_label = 0
+        idx_interval, mzs_interval = idx_interval[order], mzs_interval[order]
+        labels, current_label = labels[order], 0
         for start_i, stop_i in _get_cluster_group_idx(labels):
             n_clusters = _postprocess_cluster(
                 labels[start_i:stop_i], mzs_interval[start_i:stop_i],
@@ -205,7 +206,23 @@ def _cluster_interval(embeddings: np.ndarray, idx: np.ndarray, mzs: np.ndarray,
             current_label += n_clusters
         # Assign cluster labels.
         cluster_labels[idx_interval] = labels
+        if current_label > 0:
+            # Compute cluster medoids.
+            order_ = np.argsort(labels)
+            idx_interval, labels = idx_interval[order_], labels[order_]
+            order_map = order[order_]
+            medoids = _get_cluster_medoids(idx_interval, labels, pdist,
+                                           order_map)
+        else:
+            medoids = None
+        # Force memory clearing.
+        del pdist
+        if n_embeddings > 2**11:
+            gc.collect()
+    else:
+        medoids = None
     pbar.update(n_embeddings)
+    return medoids
 
 
 @nb.njit(boundscheck=False)
@@ -274,7 +291,7 @@ def _postprocess_cluster(cluster_labels: np.ndarray, cluster_mzs: np.ndarray,
         # (like Scikit-Learn does).
         linkage = _linkage(cluster_mzs, precursor_tol_mode)
         with nb.objmode(cluster_assignments='int32[:]'):
-            cluster_assignments = fcluster(
+            cluster_assignments = sch.fcluster(
                 linkage, precursor_tol_mass, 'distance') - 1
         n_clusters = cluster_assignments.max() + 1
         # Update cluster assignments.
@@ -346,6 +363,45 @@ def _linkage(mzs: np.ndarray, precursor_tol_mode: str) -> np.ndarray:
 
 
 @nb.njit(fastmath=True, boundscheck=False)
+def _get_cluster_medoids(idx_interval: np.ndarray, labels: np.ndarray,
+                         pdist: np.ndarray, order_map: np.ndarray) \
+        -> np.ndarray:
+    """
+    Get the indexes of the cluster medoids.
+
+    Parameters
+    ----------
+    idx_interval : np.ndarray
+        Embedding indexes.
+    labels : np.ndarray
+        Cluster labels.
+    pdist : np.ndarray
+        Condensed pairwise distance matrix.
+    order_map : np.ndarray
+        Map to convert label indexes to pairwise distance matrix indexes.
+
+    Returns
+    -------
+    List[int]
+        List with indexes of the medoids for each cluster.
+    """
+    medoids, m = [], len(idx_interval)
+    for start_i, stop_i in _get_cluster_group_idx(labels):
+        if stop_i - start_i > 1:
+            row_sum = np.zeros(stop_i - start_i, np.float32)
+            for row in range(stop_i - start_i):
+                for col in range(row + 1, stop_i - start_i):
+                    i, j = order_map[start_i + row], order_map[start_i + col]
+                    if i > j:
+                        i, j = j, i
+                    pdist_ij = pdist[m * i + j - ((i + 2) * (i + 1)) // 2]
+                    row_sum[row] += pdist_ij
+                    row_sum[col] += pdist_ij
+            medoids.append(idx_interval[start_i + np.argmin(row_sum)])
+    return np.asarray(medoids, dtype=np.int32)
+
+
+@nb.njit(boundscheck=False)
 def _assign_global_cluster_labels(cluster_labels: np.ndarray, idx: np.ndarray,
                                   splits: nb.typed.List, current_label: int) \
         -> int:
@@ -377,120 +433,3 @@ def _assign_global_cluster_labels(cluster_labels: np.ndarray, idx: np.ndarray,
                     max_label = cluster_labels[j]
         current_label = max_label
     return max_label
-
-
-def get_cluster_medoids(clusters_filename: str, distances_filename: str):
-    """
-    Get indexes of the cluster representative spectra (medoids).
-
-    Parameters
-    ----------
-    clusters_filename : str
-        Cluster label assignments file.
-    distances_filename : str
-        Precomputed pairwise distance matrix file to use for the DBSCAN
-        clustering.
-
-    Returns
-    -------
-    Optional[np.ndarray]
-        The indexes of the medoid elements for all non-noise clusters, or None
-        if only noise clusters are present.
-    """
-    pairwise_dist_matrix = ss.load_npz(distances_filename)
-    return _get_cluster_medoids(
-        np.load(clusters_filename), pairwise_dist_matrix.indptr,
-        pairwise_dist_matrix.indices, pairwise_dist_matrix.data)
-
-
-@nb.njit(parallel=True, boundscheck=False)
-def _get_cluster_medoids(clusters: np.ndarray,
-                         pairwise_indptr: np.ndarray,
-                         pairwise_indices: np.ndarray,
-                         pairwise_data: np.ndarray) \
-        -> Optional[np.ndarray]:
-    """
-    Get indexes of the cluster representative spectra (medoids).
-
-    Parameters
-    ----------
-    clusters : np.ndarray
-        Cluster label assignments.
-    pairwise_indptr : np.ndarray
-        The index pointers for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    pairwise_indices : np.ndarray
-        The column indices for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    pairwise_data : np.ndarray
-        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
-
-    Returns
-    -------
-    Optional[np.ndarray]
-        The indexes of the medoid elements for all non-noise clusters, or None
-        if only noise clusters are present.
-    """
-    order, min_i = np.argsort(clusters), 0
-    while min_i < clusters.shape[0] and clusters[order[min_i]] == -1:
-        min_i += 1
-    # Only noise clusters.
-    if min_i == clusters.shape[0]:
-        return None
-    # Find the indexes of the representatives for each unique cluster.
-    cluster_idx, max_i = [], min_i
-    while max_i < order.shape[0]:
-        while (max_i < order.shape[0] and
-               clusters[order[min_i]] == clusters[order[max_i]]):
-            max_i += 1
-        cluster_idx.append((min_i, max_i))
-        min_i = max_i
-    representatives = np.empty(len(cluster_idx), np.uint)
-    for i in nb.prange(len(cluster_idx)):
-        representatives[i] = _get_cluster_medoid_index(
-            order[cluster_idx[i][0]:cluster_idx[i][1]], pairwise_indptr,
-            pairwise_indices, pairwise_data)
-    return representatives
-
-
-@nb.njit(fastmath=True, boundscheck=False)
-def _get_cluster_medoid_index(cluster_mask: np.ndarray,
-                              pairwise_indptr: np.ndarray,
-                              pairwise_indices: np.ndarray,
-                              pairwise_data: np.ndarray) -> int:
-    """
-    Get the index of the cluster medoid element.
-
-    Parameters
-    ----------
-    cluster_mask : np.ndarray
-        Indexes of the items belonging to the current cluster.
-    pairwise_indptr : np.ndarray
-        The index pointers for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    pairwise_indices : np.ndarray
-        The column indices for the nearest neighbor distances. See
-        `scipy.sparse.csr_matrix`.
-    pairwise_data : np.ndarray
-        The nearest neighbor distances. See `scipy.sparse.csr_matrix` (`data`).
-
-    Returns
-    -------
-    int
-        The index of the cluster's medoid element.
-    """
-    if len(cluster_mask) <= 2:
-        # Pairwise distances will be identical.
-        return cluster_mask[0]
-    min_i, min_avg = 0, np.inf
-    for row_i in range(cluster_mask.shape[0]):
-        indices = pairwise_indices[pairwise_indptr[cluster_mask[row_i]]:
-                                   pairwise_indptr[cluster_mask[row_i] + 1]]
-        data = pairwise_data[pairwise_indptr[cluster_mask[row_i]]:
-                             pairwise_indptr[cluster_mask[row_i] + 1]]
-        col_i = np.asarray([i for cm in cluster_mask
-                            for i, ind in enumerate(indices) if cm == ind])
-        row_avg = np.mean(data[col_i])
-        if row_avg < min_avg:
-            min_i, min_avg = row_i, row_avg
-    return cluster_mask[min_i]
