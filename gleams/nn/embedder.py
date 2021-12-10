@@ -77,6 +77,7 @@ def contrastive_loss(y_true: tf.Tensor, y_pred: tf.Tensor):
     """
     ramp_square = K.square(K.minimum(y_pred, config.margin))
     margin_square = K.square(K.maximum(config.margin - y_pred, 0))
+    y_true = tf.cast(y_true, tf.float32)
     return K.mean(y_true * config.loss_label_certainty * ramp_square +
                   (1 - y_true * config.loss_label_certainty) * margin_square)
 
