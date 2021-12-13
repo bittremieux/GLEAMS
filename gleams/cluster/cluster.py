@@ -52,7 +52,7 @@ def cluster(embeddings_filename: str, metadata_filename: str,
                       'not recomputed')
         return
     clusters_dir = os.path.dirname(clusters_filename)
-    if not os.path.exists(clusters_dir):
+    if clusters_dir and not os.path.exists(clusters_dir):
         os.mkdir(clusters_dir)
     # Sort the metadata by increasing precursor m/z for easy subsetting.
     metadata = (pd.read_parquet(metadata_filename, columns=['charge', 'mz'])

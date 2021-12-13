@@ -37,9 +37,9 @@ def gleams():
 @gleams.command('embed')
 @click.argument('peak_in', nargs=-1, required=True)
 @click.option(
-    '--embed_name', default='GLEAMS.embed',
+    '--embed_name', default='GLEAMS_embed',
     help='The output will be written to the current working directory with the'
-         ' specified name (default: "GLEAMS.embed"). The output consists of a '
+         ' specified name (default: "GLEAMS_embed"). The output consists of a '
          'NumPy file containing the GLEAMS embeddings (extension ".npy") and '
          'a Parquet file containing the corresponding MS/MS spectra metadata '
          '(extension ".parquet").')
@@ -59,7 +59,7 @@ def cli_embed(peak_in: List[str], embed_name: str) -> None:
 
     # Create temporary working directory.
     temp_dir = tempfile.mkdtemp()
-    metadata_filename = os.path.join(temp_dir, 'metadata.parquet')
+    metadata_filename = os.path.join(temp_dir, f'{embed_name}.parquet')
     embed_dir = os.path.join(temp_dir, 'embed')
     os.mkdir(embed_dir)
     # Create a metadata file with the file names.
@@ -104,26 +104,24 @@ def cli_embed(peak_in: List[str], embed_name: str) -> None:
 
 @gleams.command('cluster')
 @click.option(
-    '--embed_name', default='GLEAMS.embed',
-    help='Name of the GLEAMS embeddings (default: "GLEAMS.embed"). Both a '
+    '--embed_name', default='GLEAMS_embed',
+    help='Name of the GLEAMS embeddings (default: "GLEAMS_embed"). Both a '
          'NumPy file and a Parquet file should be present in the current '
          'working directory.')
 @click.option(
-    '--cluster_name', default='GLEAMS.cluster',
+    '--cluster_name', default='GLEAMS_cluster',
     help='The output will be written to the current working directory with the'
-         ' specified name (default: "GLEAMS.cluster"). The output consists of '
+         ' specified name (default: "GLEAMS_cluster"). The output consists of '
          'a NumPy file containing the cluster labels (extension ".npy") and '
-         'a Parquet file containing the corresponding MS/MS spectra metadata '
-         '(extension ".parquet"). Attention: the spectrum order in this '
-         'metadata file differs from the order in the embedding metadata '
-         'file.')
+         'a NumPy file containing indexes of the cluster medoid spectra '
+         '(extension "_medoids.npy").')
 @click.option(
-    '--eps', default=0.05,
-    help='The maximum Euclidean distance between embeddings to be considered '
-         'in each other\'s neighborhood during DBSCAN clustering '
-         '(default: 0.05).'
+    '--distance_threshold', default=0.3,
+    help='The Euclidean distance threshold between embeddings to be merged '
+         'during hierarchical clustering (average linkage) (default: 0.3).'
 )
-def cli_cluster(embed_name: str, cluster_name: str, eps: float) -> None:
+def cli_cluster(embed_name: str, cluster_name: str,
+                distance_threshold: float) -> None:
     """
     Cluster embeddings.
 
@@ -132,26 +130,7 @@ def cli_cluster(embed_name: str, cluster_name: str, eps: float) -> None:
     """
     logger.info('GLEAMS version %s', str(__version__))
 
-    # Create temporary working directory.
-    temp_dir = tempfile.mkdtemp()
-    dist_filename = os.path.join(temp_dir, f'{embed_name}.npz')
-    # Compute the pairwise distance to a temporary file.
-    cluster.compute_pairwise_distances(
-        f'{embed_name}.npy', f'{embed_name}.parquet', dist_filename,
-        config.precursor_tol_mass, config.precursor_tol_mode,
-        config.mz_interval, config.num_neighbors, config.num_neighbors_ann,
-        config.num_probe, config.batch_size_add, config.batch_size_dist,
-        config.charges)
-    # Move the metadata file to the working directory.
-    shutil.move(os.path.join(temp_dir, f'{embed_name}.parquet'),
-                f'{cluster_name}.parquet')
-    # Remove previous result (if applicable).
-    if os.path.isfile(f'{cluster_name}.npy'):
-        os.remove(f'{cluster_name}.npy')
-    # DBSCAN clustering.
-    cluster.cluster(
-        dist_filename, f'{cluster_name}.parquet', f'{cluster_name}.npy',
-        eps, config.min_samples, config.precursor_tol_mass,
-        config.precursor_tol_mode)
-    # Clean up intermediate files.
-    shutil.rmtree(temp_dir)
+    cluster.cluster(f'{embed_name}.npy', f'{embed_name}.parquet',
+                    f'{cluster_name}.npy', config.precursor_tol_mass,
+                    config.precursor_tol_mode, config.linkage,
+                    distance_threshold, config.charges)

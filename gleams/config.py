@@ -79,4 +79,5 @@ num_neighbors_ann = 1024
 num_probe = 1024
 
 # Clustering.
+linkage = 'average'
 distance_threshold = 0.35
