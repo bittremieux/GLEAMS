@@ -69,6 +69,26 @@ Additionally, a file `GLEAMS_cluster_medoids.npy` will be created containing ind
 
 Full configuration of GLEAMS, including various configurations to train the neural network, can be modified in the `gleams/config.py` file.
 
+Frequently Asked Questions
+--------------------------
+
+**Where can I find the GLEAMS training data?**
+
+GLEAMS was trained on 30 million PSMs from the [MassIVE-KB (v1) dataset](https://massive.ucsd.edu/ProteoSAFe/static/massive-kb-libraries.jsp).
+As this is a very large dataset, the spectra are not readily available as a single download.
+
+To compile the full training dataset, on the [MassIVE website](https://massive.ucsd.edu/ProteoSAFe/static/massive.jsp), go to [MassIVE Knowledge Base](https://massive.ucsd.edu/ProteoSAFe/static/massive-kb-libraries.jsp) > [Human HCD Spectral Library](https://massive.ucsd.edu/ProteoSAFe/status.jsp?task=82c0124b6053407fa41ba98f53fd8d89) > [All Candidate library spectra](https://massive.ucsd.edu/ProteoSAFe/result.jsp?task=82c0124b6053407fa41ba98f53fd8d89&view=candidate_library_spectra) > Download.
+This will give you a zipped TSV file with the metadata and peptide identifications for all 30 million PSMs.
+Using the filename (column "filename") you can then [retrieve the corresponding spectra from the MassIVE FTP server](https://github.com/bittremieux/GLEAMS/blob/master/gleams/metadata/metadata.py#L176) and extract the required spectra using their scan number (column "scan").
+
+These 30 million PSMs are a subset of all spectrum identifications that were obtained during compilation of the MassIVE-KB resource (maximum top 100 PSMs for 2.1 million unique precursors).
+All 185 million PSMs at 1% FDR obtained using MSGF+, as described by [Wang _et al._](https://doi.org/10.1016/j.cels.2018.08.004), can be retrieved in multiple mzTab files from MassIVE.
+To do so, extract all unique search task identifiers in the "proteosafe_task" column from the previously downloaded metadata TSV file.
+Next, use these identifiers to compile the following URLs: `https://proteomics2.ucsd.edu/ProteoSAFe/result.jsp?task=[ID]&view=view_result_list` by replacing `[ID]` by each identifier.
+Finally, on each search task web page, click "Download" to download a zip file that contains all PSMs for that search task in the mzTab format.
+
+The full 669 million spectra that were processed using GLEAMS are all spectra in peak files listed in the MassIVE-KB metadata TSV file.
+
 Contact
 -------
 
