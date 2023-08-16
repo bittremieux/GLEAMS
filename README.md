@@ -115,4 +115,4 @@ The full 669 million spectra that were processed using GLEAMS are all spectra in
 Contact
 -------
 
-For more information you can visit the [official code website](https://github.com/bittremieux/GLEAMS) or send an email to <wbittremieux@health.ucsd.edu>.
+For more information you can visit the [official code website](https://github.com/bittremieux/GLEAMS) or send an email to <wout.bittremieux@uantwerpen.be>.
