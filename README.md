@@ -28,7 +28,7 @@ conda env create -f https://raw.githubusercontent.com/bittremieux/GLEAMS/master/
 ```
 2. Install GLEAMS:
 ```
-pip3 install git+https://github.com/bittremieux/GLEAMS.git
+pip install git+https://github.com/bittremieux/GLEAMS.git
 ```
 
 Using GLEAMS
@@ -71,6 +71,29 @@ Full configuration of GLEAMS, including various configurations to train the neur
 
 Frequently Asked Questions
 --------------------------
+
+**I get a "This repository is over its data quota" error when trying to install GLEAMS. Help!**
+
+Sometimes you can get the following error when trying to install GLEAMS following the instructions above:
+
+> **Warning**
+> This repository is over its data quota. Account responsible for LFS bandwith should purchase more data packs to restore access.
+
+This is caused by many people downloading GLEAMS recently, running out of Git LFS bandwith used to download the model weights.
+
+You can circumvent this error by cloning the repository and downloading the weights file manually:
+
+1. Create and activate a new Conda environment with the necessary dependencies, as described in step 1 above.
+2. Clone the GLEAMS repository _while skipping the model weights_:
+```
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/bittremieux/GLEAMS.git
+```
+3. Manually download the [GLEAMS model weights from the latest release](https://github.com/bittremieux/GLEAMS/releases/download/v0.3/gleams_82c0124b.hdf5).
+4. Move the model weights file to the `data/` directory in the cloned GLEAMS repository.
+5. From the root of the GLEAMS repository (e.g. `cd GLEAMS`), use pip to install GLEAMS:
+```
+pip install .
+```
 
 **Where can I find the GLEAMS training data?**
 
