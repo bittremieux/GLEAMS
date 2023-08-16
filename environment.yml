@@ -14,6 +14,7 @@ dependencies:
   - libiconv=1.16
   - mkl=2021.4.0
   - numpy=1.18.5
+  - protobuf==3.20
   - python=3.8
   - scipy==1.7.1
 prefix: $HOME/.conda/envs/gleams
